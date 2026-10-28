@@ -14,7 +14,7 @@ import pandas as pd
 
 COVERAGE = {
     "Soccer": ("OpenLigaDB · Bundesliga match/team results", "Team-level only. Volunteer-maintained; no complete player statistics."),
-    "NBA": ("NBA Stats · season player averages", "NBA player-season aggregates where the NBA endpoint responds; older/advanced fields vary."),
+    "NBA": ("NBA Stats · player-season averages from 1946–47 where accessible", "NBA basic records can go back to 1946–47; steals, blocks, threes and advanced metrics began later. Endpoint access may be blocked or incomplete."),
     "AFL": ("Squiggle API · team match results since approximately 2000", "Team match scores only. For disposals, tackles and player history, import a permitted dataset. A contact email is required by Squiggle."),
     "F1": ("Jolpica F1 · driver race results", "Race results back to 1950 where recorded; historical telemetry/lap data not complete."),
 }
@@ -167,8 +167,8 @@ def fetch_soccer_season(year: int, league: str = "bl1", reader=None) -> pd.DataF
 
 def fetch_nba_season(year: int) -> pd.DataFrame:
     """NBA season player-level per-game stats; endpoint access may be restricted."""
-    if not 1996 <= int(year) < date.today().year + 1:
-        raise ValueError("NBA player dashboard supports seasons starting in 1996 or later.")
+    if not 1946 <= int(year) <= date.today().year:
+        raise ValueError("NBA player history spans 1946 onward when the NBA endpoint responds.")
     try:
         from nba_api.stats.endpoints import leaguedashplayerstats
     except ImportError as exc:
@@ -204,6 +204,10 @@ def fetch_nba_season(year: int) -> pd.DataFrame:
     # Advanced measures (usage, true shooting, efficiency, ratings etc.) are
     # best-effort; NBA Stats may block calls or omit older historical seasons.
     try:
+        # The NBA confirms advanced statistical coverage only from 1996–97.
+        # Never make an advanced-data request for seasons before 1996.
+        if year < 1996:
+            raise LookupError("Advanced stats did not exist for this NBA era")
         advanced = leaguedashplayerstats.LeagueDashPlayerStats(
             season=season, per_mode_detailed="PerGame",
             measure_type_detailed_defense="Advanced", timeout=30
@@ -219,6 +223,8 @@ def fetch_nba_season(year: int) -> pd.DataFrame:
             df["advanced_data_status"] = "available where recorded"
         else:
             df["advanced_data_status"] = "not returned by provider"
+    except LookupError:
+        df["advanced_data_status"] = "Not recorded for this historical era"
     except Exception:
         df["advanced_data_status"] = "NBA advanced endpoint unavailable"
     # The date below is ONLY a chronological season marker. NBA season-level
