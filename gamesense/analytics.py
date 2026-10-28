@@ -86,6 +86,27 @@ def clean_data(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
 def rankings(df: pd.DataFrame, sport: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=['competitor', 'team', 'appearances', 'average_rating', *SPORTS[sport]['metrics']])
+    # NBA Stats returns one row per player per season (per-game averages).
+    # When multiple seasons are combined, weight each per-game average by
+    # games played; counting rows as games would be seriously misleading.
+    if (sport == "NBA" and "games" in df and "record_type" in df
+            and df["record_type"].astype(str).str.contains("season",case=False).all()):
+        out_rows = []
+        for player, group in df.groupby("competitor",dropna=True):
+            group=group.sort_values("date")
+            games=pd.to_numeric(group["games"],errors="coerce").clip(lower=0)
+            entry={"competitor": player,
+                   "team": group["team"].iloc[-1],
+                   "appearances": int(games.sum())}
+            for metric in ["rating", *SPORTS[sport]["metrics"]]:
+                values=pd.to_numeric(group[metric],errors="coerce")
+                usable=values.notna() & games.notna() & (games>0)
+                weight=games[usable].sum()
+                entry["average_rating" if metric=="rating" else metric]=(
+                    float((values[usable]*games[usable]).sum()/weight) if weight>0 else float("nan")
+                )
+            out_rows.append(entry)
+        return pd.DataFrame(out_rows).sort_values("average_rating",ascending=False,na_position="last")
     agg = {'team': 'last', 'date': 'count', 'rating': 'mean'}
     agg.update({metric: 'mean' for metric in SPORTS[sport]['metrics']})
     out = df.groupby('competitor', dropna=True).agg(agg).reset_index()
