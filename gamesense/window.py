@@ -826,7 +826,9 @@ class GameSenseWindow(QMainWindow):
         else:
             cleaned=df
         self.data[sport]=cleaned
-        self.sources[sport]=family+" · downloaded seasons, cached locally"
+        # Preserve the source label and any partially failed-season warning.
+        # Each downloaded row also carries its own data_source provenance.
+        self.sources[sport]=source+" · stored locally"
         self.is_demo[sport]=False
         storage.save(sport,cleaned,self.sources[sport])
         self.change_sport(sport)
