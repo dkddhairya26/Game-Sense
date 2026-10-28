@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      PYTHONPATH: ${{ github.workspace }}
       QT_QPA_PLATFORM: offscreen
       MPLBACKEND: QtAgg
     steps:
