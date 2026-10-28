@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from time import sleep
 
 import pandas as pd
 from PySide6.QtCore import QObject, Qt, QThread, QRectF, QLineF, Signal, Slot
@@ -287,22 +288,45 @@ class Viz(FigureCanvasQTAgg):
 
 
 class DownloadWorker(QObject):
+    """Fetch a small, sequential historical range without blocking the native UI."""
     finished = Signal(object, str)
     failed = Signal(str)
+    progress = Signal(str)
     done = Signal()
 
-    def __init__(self, sport, year):
+    def __init__(self, sport, start, end):
         super().__init__()
-        self.sport, self.year = sport, year
+        self.sport, self.start, self.end = sport, int(start), int(end)
 
     @Slot()
     def run(self):
         try:
-            df, source = fetch_season(self.sport, self.year)
-            cleaned, report = clean_data(df, self.sport)
+            frames, failed, provenance = [], [], []
+            years = list(range(self.start, self.end + 1))
+            for i, year in enumerate(years):
+                self.progress.emit(f"Downloading {self.sport} {year} ({i + 1}/{len(years)})...")
+                try:
+                    frame, source = fetch_season(self.sport, year)
+                    if frame.empty:
+                        raise ValueError("No recorded results found")
+                    frame = frame.copy()
+                    frame["data_source"] = source
+                    frames.append(frame)
+                    provenance.append(source)
+                except Exception as exc:
+                    failed.append(f"{year}: {exc}")
+                if i < len(years) - 1:
+                    sleep(.75)  # Avoid parallel requests and respect small free API services.
+            if not frames:
+                raise RuntimeError("No seasons downloaded successfully. " + " | ".join(failed))
+            cleaned, report = clean_data(pd.concat(frames, ignore_index=True), self.sport)
             if cleaned.empty:
-                raise ValueError("Provider returned no valid rows.")
-            self.finished.emit(cleaned, source)
+                raise ValueError("The provider returned no usable historical records.")
+            family = provenance[0].split(" · ")[0]
+            status = f"{family} · {len(frames)} downloaded seasons"
+            if failed:
+                status += " · INCOMPLETE: " + "; ".join(failed)
+            self.finished.emit(cleaned, status)
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
@@ -513,11 +537,17 @@ class GameSenseWindow(QMainWindow):
         sbl.addWidget(self.coverage_label)
         controls = QHBoxLayout()
         controls.addWidget(label("FETCH HISTORICAL SEASON", "eyebrow"))
-        self.year = QSpinBox()
-        self.year.setRange(1950, date.today().year)
-        self.year.setValue(date.today().year-1)
-        controls.addWidget(self.year)
-        self.download_btn = QPushButton("↓  Download real season")
+        self.start_year = QSpinBox()
+        self.start_year.setRange(1950, date.today().year)
+        self.start_year.setValue(date.today().year-5)
+        self.end_year = QSpinBox()
+        self.end_year.setRange(1950, date.today().year)
+        self.end_year.setValue(date.today().year-1)
+        controls.addWidget(label("FROM", "eyebrow"))
+        controls.addWidget(self.start_year)
+        controls.addWidget(label("TO", "eyebrow"))
+        controls.addWidget(self.end_year)
+        self.download_btn = QPushButton("↓  Download up to 5 seasons")
         self.download_btn.setObjectName("primary")
         self.download_btn.clicked.connect(self.download_season)
         controls.addWidget(self.download_btn)
@@ -571,8 +601,11 @@ class GameSenseWindow(QMainWindow):
             "Data downloads are on demand; complete historical coverage is not guaranteed."
         )
         self.download_btn.setEnabled(sport!="AFL")
-        self.year.setMinimum({"Soccer":1963,"NBA":1996,"AFL":1897,"F1":1950}[sport])
-        self.year.setValue(min(max(date.today().year-1,self.year.minimum()),date.today().year))
+        earliest={"Soccer":1963,"NBA":1996,"AFL":2000,"F1":1950}[sport]
+        self.start_year.setMinimum(earliest)
+        self.end_year.setMinimum(earliest)
+        self.start_year.setValue(max(earliest,date.today().year-5))
+        self.end_year.setValue(date.today().year-1)
         self.refresh_views()
 
     def _set_metric_items(self):
@@ -717,16 +750,25 @@ class GameSenseWindow(QMainWindow):
         if self._thread is not None:
             return
         sport=self.current_sport
-        year=self.year.value()
+        start,end=self.start_year.value(),self.end_year.value()
+        if end<start:
+            QMessageBox.warning(self,"Invalid range","The end year must be on or after the start year.")
+            return
+        if end-start+1>5:
+            QMessageBox.information(self,"Use smaller batches",
+                "To protect free public data providers, GameSense downloads a maximum of "
+                "five seasons per batch. Choose a five-year range, then repeat for more history.")
+            return
         self.download_btn.setEnabled(False)
         self.download_btn.setText("Downloading...")
-        self.statusBar().showMessage(f"Downloading {sport} {year} from the data provider...")
+        self.statusBar().showMessage(f"Downloading {sport} {start}–{end} from the data provider...")
         self._thread=QThread()
-        self._worker=DownloadWorker(sport,year)
+        self._worker=DownloadWorker(sport,start,end)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(lambda df,source: self.receive_download(sport,df,source))
         self._worker.failed.connect(lambda message: QMessageBox.warning(self,"Download not available",message))
+        self._worker.progress.connect(self.statusBar().showMessage)
         self._worker.done.connect(self._thread.quit)
         self._worker.done.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._download_complete)
@@ -735,7 +777,7 @@ class GameSenseWindow(QMainWindow):
 
     def _download_complete(self):
         self._thread=None
-        self.download_btn.setText("↓  Download real season")
+        self.download_btn.setText("↓  Download up to 5 seasons")
         self.download_btn.setEnabled(self.current_sport!="AFL")
         self.statusBar().showMessage("Ready",4000)
 
