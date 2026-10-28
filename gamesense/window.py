@@ -56,7 +56,7 @@ QComboBox,QLineEdit,QSpinBox {background:#17263A; border:1px solid #34506B; bord
 QComboBox QAbstractItemView {background:#182840; color:white; selection-background-color:#355672;}
 QTableWidget {background:#101B2C; alternate-background-color:#18263A; color:#ECF2FD; border:1px solid #23344D; border-radius:10px; gridline-color:#263955; selection-background-color:#31536D;}
 QHeaderView::section {background:#21334C; border:0; border-bottom:1px solid #42536B; color:#DBE9FB; padding:10px; font-weight:700;}
-QScrollBar:vertical {background:#0D1826; width:10px;}
+QScrollArea {background:#080E19; border:0;}\nQScrollArea > QWidget > QWidget {background:#080E19;}\nQScrollBar:vertical {background:#0D1826; width:10px;}
 QScrollBar::handle:vertical {background:#30435D; border-radius:5px;}
 """
 
