@@ -446,10 +446,10 @@ class GameSenseWindow(QMainWindow):
         self.b = QComboBox()
         self.b.setMinimumWidth(155)
         self.b.currentTextChanged.connect(self.refresh_graphs)
-        self.metric = QComboBox()
-        self.metric.setMinimumWidth(130)
-        self.metric.currentTextChanged.connect(self.refresh_graphs)
-        for title, widget in [("SEASON",self.season),("ATHLETE / TEAM A",self.a),("COMPARE WITH",self.b),("METRIC",self.metric)]:
+        self.metric_combo = QComboBox()
+        self.metric_combo.setMinimumWidth(130)
+        self.metric_combo.currentTextChanged.connect(self.refresh_graphs)
+        for title, widget in [("SEASON",self.season),("ATHLETE / TEAM A",self.a),("COMPARE WITH",self.b),("METRIC",self.metric_combo)]:
             group = QVBoxLayout()
             group.setSpacing(3)
             group.addWidget(label(title,"eyebrow"))
@@ -620,18 +620,18 @@ class GameSenseWindow(QMainWindow):
 
     def _set_metric_items(self):
         df=self.data[self.current_sport]
-        old=self.metric.currentText()
+        old=self.metric_combo.currentText()
         numeric = [col for col in df.columns
                    if col not in ("season","date","player_id")
                    and pd.api.types.is_numeric_dtype(df[col])
                    and df[col].notna().any()]
         preferred = ["rating"]+[m for m in SPORTS[self.current_sport]["metrics"] if m in numeric]
         ordered=list(dict.fromkeys([m for m in preferred if m in numeric]+sorted(numeric)))
-        self.metric.blockSignals(True)
-        self.metric.clear()
-        self.metric.addItems(ordered)
-        self.metric.setCurrentText(old if old in ordered else ("rating" if "rating" in ordered else ordered[0] if ordered else ""))
-        self.metric.blockSignals(False)
+        self.metric_combo.blockSignals(True)
+        self.metric_combo.clear()
+        self.metric_combo.addItems(ordered)
+        self.metric_combo.setCurrentText(old if old in ordered else ("rating" if "rating" in ordered else ordered[0] if ordered else ""))
+        self.metric_combo.blockSignals(False)
 
     def current(self):
         df=self.data[self.current_sport]
@@ -665,7 +665,7 @@ class GameSenseWindow(QMainWindow):
             return
         df=self.current()
         selected=list(dict.fromkeys(x for x in (self.a.currentText(),self.b.currentText()) if x))
-        metric=self.metric.currentText()
+        metric=self.metric_combo.currentText()
         self.trend.render(df,self.current_sport,selected,metric,"trend")
         self.leaders.render(df,self.current_sport,selected,metric,"leaders")
         self.comparison.render(df,self.current_sport,selected,metric,"compare")
@@ -708,7 +708,7 @@ class GameSenseWindow(QMainWindow):
         term=self.search.text().strip().casefold()
         if term and not rank.empty:
             rank=rank[rank["competitor"].astype(str).str.casefold().str.contains(term,regex=False)]
-        metric=self.metric.currentText()
+        metric=self.metric_combo.currentText()
         if metric in rank:
             rank=rank.sort_values(metric,ascending=False,na_position="last")
         self.fill_table(self.rank_table,rank.round(2).head(700))
