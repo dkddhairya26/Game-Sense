@@ -25,12 +25,15 @@ jobs:
         with:
           name: GameSense-Windows-Installer
           path: output/GameSenseSetup-Windows.exe
-      - name: Attach Windows installer to release
+      - name: Publish Windows installer on tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: gh release upload $env:GITHUB_REF_NAME output/GameSenseSetup-Windows.exe --clobber
+        run: |
+          gh release view $env:GITHUB_REF_NAME 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create $env:GITHUB_REF_NAME --title $env:GITHUB_REF_NAME --notes "GameSense desktop release. Demo data is fictional; import datasets for analysis." }
+          gh release upload $env:GITHUB_REF_NAME output/GameSenseSetup-Windows.exe --clobber
   macos:
     runs-on: macos-latest
     steps:
@@ -52,8 +55,10 @@ jobs:
         with:
           name: GameSense-macOS-DMG
           path: GameSense-macOS.dmg
-      - name: Attach Mac DMG to release
+      - name: Publish macOS DMG on tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" GameSense-macOS.dmg --clobber
+        run: |
+          gh release view "$GITHUB_REF_NAME" || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "GameSense desktop release. Demo data is fictional; import datasets for analysis."
+          gh release upload "$GITHUB_REF_NAME" GameSense-macOS.dmg --clobber
