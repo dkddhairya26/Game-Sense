@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections import deque
 from datetime import date
+from time import monotonic, sleep
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 import pandas as pd
@@ -26,7 +28,27 @@ SOURCE_URLS = {
 }
 
 
+# Protect the shared volunteer Jolpica service: <4 requests per second and
+# <500 requests/hour. Stop with a resumable message rather than hammering it.
+_JOLPICA_REQUESTS = deque()
+
+def _limit_jolpica(url: str) -> None:
+    if not url.startswith("https://api.jolpi.ca/"):
+        return
+    now = monotonic()
+    while _JOLPICA_REQUESTS and now - _JOLPICA_REQUESTS[0] > 3600:
+        _JOLPICA_REQUESTS.popleft()
+    if len(_JOLPICA_REQUESTS) >= 440:
+        raise RuntimeError("Jolpica hourly request budget reached; resume your archive later.")
+    if _JOLPICA_REQUESTS:
+        elapsed = now - _JOLPICA_REQUESTS[-1]
+        if elapsed < .30:
+            sleep(.30 - elapsed)
+    _JOLPICA_REQUESTS.append(monotonic())
+
+
 def _get_json(url: str, user_agent: str = "GameSenseDesktop/0.4 (+historical statistics explorer)") -> object:
+    _limit_jolpica(url)
     request = Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
     try:
         with urlopen(request, timeout=25) as response:
