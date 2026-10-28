@@ -9,6 +9,9 @@ on:
       - 'requirements.txt'
       - '.github/workflows/verify.yml'
   workflow_dispatch:
+concurrency:
+  group: gamesense-verify-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
