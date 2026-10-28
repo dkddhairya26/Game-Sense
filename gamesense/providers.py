@@ -81,7 +81,44 @@ def fetch_f1_season(year: int, reader=None) -> pd.DataFrame:
         offset = next_offset
     if not rows:
         raise ValueError(f"No F1 race results found for {year}.")
-    return pd.DataFrame(rows)
+    frame = pd.DataFrame(rows)
+    # Qualifying data are not complete for the entire 1950-onward archive.
+    # For supported seasons, add Q1/Q2/Q3 and classification position where
+    # Jolpica exposes them; otherwise retain real race results unchanged.
+    if reader is None and year >= 1994:
+        try:
+            qual_rows = []
+            offset = 0
+            total_qual = None
+            while total_qual is None or offset < total_qual:
+                response = _get_json(
+                    f"https://api.jolpi.ca/ergast/f1/{year}/qualifying.json?limit=100&offset={offset}")
+                mr = response.get("MRData", {})
+                limit = int(mr.get("limit", 0))
+                total_qual = int(mr.get("total", 0))
+                for race in mr.get("RaceTable", {}).get("Races", []):
+                    for result in race.get("QualifyingResults", []):
+                        qual_rows.append({
+                            "round": str(race.get("round")),
+                            "driver_id": result.get("Driver", {}).get("driverId"),
+                            "qualifying_position": result.get("position"),
+                            "q1_time": result.get("Q1"),
+                            "q2_time": result.get("Q2"),
+                            "q3_time": result.get("Q3"),
+                        })
+                if not total_qual:
+                    break
+                if limit <= 0:
+                    break
+                offset += limit
+            if qual_rows:
+                qualifying = pd.DataFrame(qual_rows).drop_duplicates(["round","driver_id"])
+                frame["round"] = frame["round"].astype(str)
+                frame = frame.merge(qualifying, on=["round","driver_id"], how="left")
+        except (RuntimeError, ValueError, KeyError):
+            # Missing/blocked qualifying feed is different from zero qualifying laps.
+            pass
+    return frame
 
 
 def fetch_soccer_season(year: int, league: str = "bl1", reader=None) -> pd.DataFrame:
