@@ -2,10 +2,7 @@ name: Build public installers
 on:
   workflow_dispatch:
   push:
-    branches: [main]
     tags: ['v*']
-    paths:
-      - '.github/workflows/release.yml'
 permissions:
   contents: write
 jobs:
