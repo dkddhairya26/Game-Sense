@@ -701,10 +701,28 @@ class GameSenseWindow(QMainWindow):
         """Show EVERY present numeric metric, not only the five core sport ratings."""
         ranked=rankings(df,self.current_sport)
         extras=[name for name in df.columns
-                if name not in ranked.columns and name not in ("season","date","player_id")
+                if name not in ranked.columns and name not in
+                   ("season","date","player_id","team_id","date_is_marker")
                 and pd.api.types.is_numeric_dtype(df[name])]
         if extras and not df.empty:
-            additional=df.groupby("competitor")[extras].mean().reset_index()
+            nba_seasons=(self.current_sport=="NBA" and "games" in df
+                         and "record_type" in df and
+                         df["record_type"].astype(str).str.contains("season",case=False).all())
+            if nba_seasons:
+                rows=[]
+                for person,part in df.groupby("competitor"):
+                    weights=pd.to_numeric(part["games"],errors="coerce").clip(lower=0)
+                    record={"competitor":person}
+                    for metric in extras:
+                        values=pd.to_numeric(part[metric],errors="coerce")
+                        keep=values.notna() & weights.notna() & (weights>0)
+                        denom=weights[keep].sum()
+                        record[metric]=(float((values[keep]*weights[keep]).sum()/denom)
+                                        if denom>0 else float("nan"))
+                    rows.append(record)
+                additional=pd.DataFrame(rows)
+            else:
+                additional=df.groupby("competitor")[extras].mean().reset_index()
             ranked=ranked.merge(additional,on="competitor",how="left")
         return ranked
 
