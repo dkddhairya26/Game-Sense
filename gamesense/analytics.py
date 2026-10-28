@@ -41,6 +41,18 @@ def clean_data(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
     present = df[list(weights)].notna()
     df['rating'] = sum(df[k].fillna(0) * w for k, w in weights.items())
     df.loc[~present.any(axis=1), 'rating'] = float('nan')
+    # Imported OpenLigaDB rows describe club MATCHES, not individual athletes.
+    # Use a separately documented team-form formula rather than a player rating.
+    if sport == "Soccer" and "record_type" in df and {"wins", "draws", "goal_difference"} <= set(df.columns):
+        clubs = df["record_type"].eq("team match").fillna(False)
+        for column in ("wins","draws","goal_difference"):
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+        df.loc[clubs, "rating"] = (
+            4 * df.loc[clubs, "wins"].fillna(0)
+            + 2 * df.loc[clubs, "draws"].fillna(0)
+            + df.loc[clubs, "goals"].fillna(0)
+            + .6 * df.loc[clubs, "goal_difference"].fillna(0)
+        )
     df = df.sort_values('date').reset_index(drop=True)
     return df, {'input_rows': original, 'duplicates_removed': duplicates, 'invalid_rows_removed': removed, 'valid_rows': len(df)}
 
