@@ -381,6 +381,9 @@ class GameSenseWindow(QMainWindow):
         self.current_sport = "Soccer"
         self.current_page = 0
         self._thread = None
+        self._job_sport = None
+        self._job_summary = ""
+        self._job_loaded = 0
         self.build()
         self.change_sport("Soccer")
 
@@ -435,6 +438,10 @@ class GameSenseWindow(QMainWindow):
         heading.addWidget(label("Scout players, uncover trends and explore the numbers.", "subtitle"))
         head.addLayout(heading)
         head.addStretch()
+        self.real_btn = QPushButton("✦  GET REAL HISTORY")
+        self.real_btn.setObjectName("primary")
+        self.real_btn.clicked.connect(self.open_historical_library)
+        head.addWidget(self.real_btn)
         self.import_btn = QPushButton("＋  Import data")
         self.import_btn.clicked.connect(self.import_file)
         head.addWidget(self.import_btn)
@@ -445,6 +452,11 @@ class GameSenseWindow(QMainWindow):
 
         self.hero = SportHero()
         bl.addWidget(self.hero)
+        self.real_notice = label(
+            "FICTIONAL DEMO RECORDS — NOT REAL PLAYERS. "
+            "Click GET REAL HISTORY to download real seasons for this sport.",
+            "status", wrap=True)
+        bl.addWidget(self.real_notice)
 
         kpis = QHBoxLayout()
         kpis.setSpacing(11)
@@ -564,7 +576,7 @@ class GameSenseWindow(QMainWindow):
         self.coverage_label = label("", "content", wrap=True)
         sbl.addWidget(self.coverage_label)
         controls = QHBoxLayout()
-        controls.addWidget(label("FETCH HISTORICAL SEASON", "eyebrow"))
+        controls.addWidget(label("HISTORICAL YEARS", "eyebrow"))
         self.start_year = QSpinBox()
         self.start_year.setRange(1950, date.today().year)
         self.start_year.setValue(date.today().year-5)
@@ -575,12 +587,26 @@ class GameSenseWindow(QMainWindow):
         controls.addWidget(self.start_year)
         controls.addWidget(label("TO", "eyebrow"))
         controls.addWidget(self.end_year)
-        self.download_btn = QPushButton("↓  Download up to 5 seasons")
+        self.download_btn = QPushButton("↓  Load selected years")
         self.download_btn.setObjectName("primary")
         self.download_btn.clicked.connect(self.download_season)
         controls.addWidget(self.download_btn)
-        controls.addStretch()
+        self.all_years_btn = QPushButton("★  LOAD ALL AVAILABLE YEARS")
+        self.all_years_btn.clicked.connect(self.load_all_years)
+        controls.addWidget(self.all_years_btn)
+        self.cancel_btn = QPushButton("Stop")
+        self.cancel_btn.clicked.connect(self.cancel_download)
+        self.cancel_btn.setEnabled(False)
+        controls.addWidget(self.cancel_btn)
         sbl.addLayout(controls)
+        self.archive_progress = QProgressBar()
+        self.archive_progress.setMinimum(0)
+        self.archive_progress.setMaximum(100)
+        self.archive_progress.setValue(0)
+        self.archive_progress.setTextVisible(True)
+        sbl.addWidget(self.archive_progress)
+        self.archive_info = label("No historical download in progress.", "content", wrap=True)
+        sbl.addWidget(self.archive_info)
         self.afl_email_label = label("SQUIGGLE CONTACT EMAIL (REQUIRED FOR AFL TEAM DATA)", "eyebrow")
         self.afl_email = QLineEdit()
         self.afl_email.setPlaceholderText("Your contact email — sent to Squiggle only, not stored")
@@ -611,20 +637,28 @@ class GameSenseWindow(QMainWindow):
     def change_sport(self,sport):
         self.current_sport = sport
         style=STYLES[sport]
+        previous_sport = self.current_sport
         self.hero.set_sport(sport)
         # Every sport accents the *entire* navigation and controls, not only
         # the hero artwork. Transparent labels keep panels visually seamless.
         self.setStyleSheet(STYLE.replace("#24E6A4",style["accent"]))
         self.import_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
         self.download_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
+        self.real_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
         for key,btn in self.sport_buttons.items():
             btn.setProperty("active","true" if key==sport else "false")
             btn.style().unpolish(btn); btn.style().polish(btn)
-        self.sidebar_status.setText(("●  DEMO DATA" if self.is_demo[sport] else "●  SAVED DATA") +
-                                    "\n" + style["label"])
+        real = not self.is_demo[sport]
+        years_in_cache = cache_years(self.data[sport], sport) if real else set()
+        self.sidebar_status.setText(
+            (f"●  {len(years_in_cache)} REAL SEASONS" if real else "●  FICTIONAL DEMO ONLY")
+            + "\n" + style["label"])
+        self.real_notice.setVisible(self.is_demo[sport])
+        self.real_btn.setText("✦  GET REAL HISTORY" if self.is_demo[sport]
+                              else "✦  ADD MORE REAL YEARS")
         df=self.data[sport]
         self.season.blockSignals(True)
-        prev=self.season.currentText()
+        prev="All seasons" if previous_sport != sport else self.season.currentText()
         self.season.clear()
         self.season.addItems(["All seasons"]+sorted(df["season"].dropna().astype(str).unique(),reverse=True))
         if prev in [self.season.itemText(i) for i in range(self.season.count())]:
@@ -638,14 +672,18 @@ class GameSenseWindow(QMainWindow):
             f"Source information: {SOURCE_URLS[sport]}\n"
             "Data downloads are on demand; complete historical coverage is not guaranteed."
         )
-        self.download_btn.setEnabled(True)
+        self.download_btn.setEnabled(self._thread is None)
+        self.all_years_btn.setEnabled(self._thread is None)
         self.afl_email_label.setVisible(sport=="AFL")
         self.afl_email.setVisible(sport=="AFL")
-        earliest={"Soccer":1963,"NBA":1996,"AFL":2000,"F1":1950}[sport]
+        earliest=EARLIEST[sport]
         self.start_year.setMinimum(earliest)
         self.end_year.setMinimum(earliest)
-        self.start_year.setValue(max(earliest,date.today().year-5))
-        self.end_year.setValue(date.today().year-1)
+        self.start_year.setValue(max(earliest,date.today().year-4))
+        self.end_year.setValue(date.today().year)
+        self.archive_info.setText(
+            f"{len(years_in_cache)} provider seasons saved locally for {sport}. "
+            f"Available range: {earliest}–{date.today().year}. {GRAIN[sport]}.")
         self.refresh_views()
 
     def _set_metric_items(self):
