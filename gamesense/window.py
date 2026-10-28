@@ -21,6 +21,7 @@ from .analytics import SPORTS, clean_data, rankings, recent_form, summary
 from .demo import demo_data
 from .importers import prepare_import
 from .providers import COVERAGE, SOURCE_URLS, fetch_season
+from .history import EARLIEST, FAMILIES, GRAIN, cache_years, plan_years, merge_season
 from . import storage
 
 STYLES = {
@@ -292,46 +293,67 @@ class Viz(FigureCanvasQTAgg):
 
 
 class DownloadWorker(QObject):
-    """Fetch a small, sequential historical range without blocking the native UI."""
-    finished = Signal(object, str)
+    """Resumable historical download, one completed season delivered at a time.
+
+    Database writes happen on the GUI thread when season_ready is emitted.
+    Successfully finished years therefore survive an interrupted multi-year job.
+    """
+    season_ready = Signal(object, str)
+    progress = Signal(str, int, int)
     failed = Signal(str)
-    progress = Signal(str)
+    completed = Signal(str)
     done = Signal()
 
-    def __init__(self, sport, start, end, contact_email=None):
+    def __init__(self, sport, years, contact_email=None):
         super().__init__()
-        self.sport, self.start, self.end = sport, int(start), int(end)
+        from threading import Event
+        self.sport = sport
+        self.years = list(years)
         self.contact_email = contact_email
+        self._cancel = Event()
+
+    def cancel(self):
+        self._cancel.set()
 
     @Slot()
     def run(self):
+        succeeded, failed, consecutive = 0, [], 0
         try:
-            frames, failed, provenance = [], [], []
-            years = list(range(self.start, self.end + 1))
-            for i, year in enumerate(years):
-                self.progress.emit(f"Downloading {self.sport} {year} ({i + 1}/{len(years)})...")
+            for index, year in enumerate(self.years, 1):
+                if self._cancel.is_set():
+                    break
+                self.progress.emit(f"{self.sport}: year {year} ({index}/{len(self.years)})",
+                                   index - 1, len(self.years))
                 try:
-                    frame, source = fetch_season(self.sport, year, contact_email=self.contact_email)
-                    if frame.empty:
-                        raise ValueError("No recorded results found")
-                    frame = frame.copy()
-                    frame["data_source"] = source
-                    frames.append(frame)
-                    provenance.append(source)
+                    df, source = fetch_season(self.sport, year,
+                                              contact_email=self.contact_email)
+                    if df.empty:
+                        raise ValueError("Provider returned no records")
+                    df = df.copy()
+                    df["data_source"] = source
+                    clean, report = clean_data(df, self.sport)
+                    if clean.empty:
+                        raise ValueError("No valid rows")
+                    self.season_ready.emit(clean, source)
+                    succeeded += 1
+                    consecutive = 0
                 except Exception as exc:
-                    failed.append(f"{year}: {exc}")
-                if i < len(years) - 1:
-                    sleep(.75)  # Avoid parallel requests and respect small free API services.
-            if not frames:
-                raise RuntimeError("No seasons downloaded successfully. " + " | ".join(failed))
-            cleaned, report = clean_data(pd.concat(frames, ignore_index=True), self.sport)
-            if cleaned.empty:
-                raise ValueError("The provider returned no usable historical records.")
-            family = provenance[0].split(" · ")[0]
-            status = f"{family} · {len(frames)} downloaded seasons"
-            if failed:
-                status += " · INCOMPLETE: " + "; ".join(failed)
-            self.finished.emit(cleaned, status)
+                    consecutive += 1
+                    error = str(exc)
+                    failed.append(f"{year}: {error}")
+                    if "rate limit" in error.lower() or "429" in error or consecutive >= 3:
+                        failed.append("Stopped after provider throttling or three consecutive failures. "
+                                      "Run again later to resume completed years.")
+                        break
+                self.progress.emit(
+                    f"{self.sport}: {succeeded} season(s) loaded, {len(failed)} issue(s)",
+                    index, len(self.years))
+                if index < len(self.years) and self._cancel.wait(1.0):
+                    break
+            result = (f"{succeeded} season(s) saved from {len(self.years)} planned years. "
+                      f"{'Download cancelled. ' if self._cancel.is_set() else ''}"
+                      f"{'Issues: ' + '; '.join(failed[:5]) if failed else ''}")
+            self.completed.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
