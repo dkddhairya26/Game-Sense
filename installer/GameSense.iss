@@ -1,5 +1,5 @@
 #define AppName "GameSense"
-#define AppVersion "0.2.0"
+#define AppVersion "0.4.0"
 [Setup]
 AppId={{6F0C5A20-41B6-4DB4-B5D9-A9BFA85A7201}
 AppName={#AppName}
