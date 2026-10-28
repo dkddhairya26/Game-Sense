@@ -19,6 +19,7 @@ from matplotlib.figure import Figure
 
 from .analytics import SPORTS, clean_data, rankings, recent_form, summary
 from .demo import demo_data
+from .importers import prepare_import
 from .providers import COVERAGE, SOURCE_URLS, fetch_season
 from . import storage
 
@@ -744,6 +745,7 @@ class GameSenseWindow(QMainWindow):
             else:
                 raw=pd.read_excel(path)
             sport=self.current_sport
+            raw, import_notes = prepare_import(raw,sport)
             cleaned,report=clean_data(raw,sport)
             if cleaned.empty: raise ValueError("No valid records after cleaning.")
             self.data[sport]=cleaned
@@ -752,7 +754,8 @@ class GameSenseWindow(QMainWindow):
             storage.save(sport,cleaned,self.sources[sport])
             self.change_sport(sport)
             QMessageBox.information(self,"Data imported","Imported "+str(report["valid_rows"])+" valid records.\n"
-                                    +str(report["duplicates_removed"])+" duplicates removed.")
+                                    +str(report["duplicates_removed"])+" duplicates removed.\n\n"
+                                    +"\n".join(import_notes))
         except Exception as exc:
             QMessageBox.critical(self,"Import failed",str(exc))
 
