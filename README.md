@@ -1,4 +1,4 @@
-# GameSense Desktop — Historical Archive Edition (v0.5 beta)
+# GameSense Desktop — Historical Archive Edition (v0.5 beta (resumable historical archives))
 
 GameSense is a **native PySide6 desktop application** for Windows and macOS. There is no Streamlit server and no browser-based analytics interface.
 
