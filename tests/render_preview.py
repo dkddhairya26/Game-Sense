@@ -17,6 +17,12 @@ for sport in ("Soccer", "NBA", "AFL", "F1"):
     app.processEvents()
     assert window.kpi_widgets[0].text() != "—", sport
     assert window.metric_combo.count() > 0, sport
+    assert window.season.currentText() == "All seasons", sport
+    assert window.all_years_btn.isEnabled(), sport
+    assert window._thread is None, sport
+    if sport == "NBA":
+        assert window.start_year.minimum() == 1946
+    assert window.real_notice.isVisible(), sport
     target = folder / ("GameSense-" + sport.replace(" ", "-") + ".png")
     assert window.grab().save(str(target)), target
     print(sport, "OK", target)
