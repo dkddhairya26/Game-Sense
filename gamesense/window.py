@@ -294,9 +294,10 @@ class DownloadWorker(QObject):
     progress = Signal(str)
     done = Signal()
 
-    def __init__(self, sport, start, end):
+    def __init__(self, sport, start, end, contact_email=None):
         super().__init__()
         self.sport, self.start, self.end = sport, int(start), int(end)
+        self.contact_email = contact_email
 
     @Slot()
     def run(self):
@@ -306,7 +307,7 @@ class DownloadWorker(QObject):
             for i, year in enumerate(years):
                 self.progress.emit(f"Downloading {self.sport} {year} ({i + 1}/{len(years)})...")
                 try:
-                    frame, source = fetch_season(self.sport, year)
+                    frame, source = fetch_season(self.sport, year, contact_email=self.contact_email)
                     if frame.empty:
                         raise ValueError("No recorded results found")
                     frame = frame.copy()
@@ -553,6 +554,13 @@ class GameSenseWindow(QMainWindow):
         controls.addWidget(self.download_btn)
         controls.addStretch()
         sbl.addLayout(controls)
+        self.afl_email_label = label("SQUIGGLE CONTACT EMAIL (REQUIRED FOR AFL TEAM DATA)", "eyebrow")
+        self.afl_email = QLineEdit()
+        self.afl_email.setPlaceholderText("Your contact email — sent to Squiggle only, not stored")
+        self.afl_email.setToolTip("Squiggle requires a contact email in each API User-Agent. "
+                                "Only AFL match requests send this address; GameSense does not save it.")
+        sbl.addWidget(self.afl_email_label)
+        sbl.addWidget(self.afl_email)
         dl.addWidget(source_box)
         dl.addWidget(label("SAVED EVENT / PLAYER RECORDS", "section"))
         self.raw_table = QTableWidget()
@@ -600,7 +608,9 @@ class GameSenseWindow(QMainWindow):
             f"Source information: {SOURCE_URLS[sport]}\n"
             "Data downloads are on demand; complete historical coverage is not guaranteed."
         )
-        self.download_btn.setEnabled(sport!="AFL")
+        self.download_btn.setEnabled(True)
+        self.afl_email_label.setVisible(sport=="AFL")
+        self.afl_email.setVisible(sport=="AFL")
         earliest={"Soccer":1963,"NBA":1996,"AFL":2000,"F1":1950}[sport]
         self.start_year.setMinimum(earliest)
         self.end_year.setMinimum(earliest)
@@ -762,8 +772,17 @@ class GameSenseWindow(QMainWindow):
         self.download_btn.setEnabled(False)
         self.download_btn.setText("Downloading...")
         self.statusBar().showMessage(f"Downloading {sport} {start}–{end} from the data provider...")
+        contact = self.afl_email.text().strip() if sport=="AFL" else None
+        if sport=="AFL" and (not contact or "@" not in contact):
+            self.download_btn.setEnabled(True)
+            self.download_btn.setText("↓  Download up to 5 seasons")
+            QMessageBox.information(self,"Squiggle identification required",
+                "The Squiggle API requires a contact email in its User-Agent. "
+                "Enter an email in Data Studio before downloading AFL TEAM match results. "
+                "No email is needed to import your own AFL player data.")
+            return
         self._thread=QThread()
-        self._worker=DownloadWorker(sport,start,end)
+        self._worker=DownloadWorker(sport,start,end,contact)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(lambda df,source: self.receive_download(sport,df,source))
@@ -778,7 +797,7 @@ class GameSenseWindow(QMainWindow):
     def _download_complete(self):
         self._thread=None
         self.download_btn.setText("↓  Download up to 5 seasons")
-        self.download_btn.setEnabled(self.current_sport!="AFL")
+        self.download_btn.setEnabled(True)
         self.statusBar().showMessage("Ready",4000)
 
     def receive_download(self,sport,df,source):
