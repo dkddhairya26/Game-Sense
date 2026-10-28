@@ -221,7 +221,10 @@ def fetch_nba_season(year: int) -> pd.DataFrame:
             df["advanced_data_status"] = "not returned by provider"
     except Exception:
         df["advanced_data_status"] = "NBA advanced endpoint unavailable"
+    # The date below is ONLY a chronological season marker. NBA season-level
+    # averages are not recorded as if they occurred in a single match.
     df["date"] = f"{year + 1}-06-30"
+    df["date_is_marker"] = True
     df["season"] = season
     df["competitor"] = raw["PLAYER_NAME"]
     df["team"] = raw["TEAM_ABBREVIATION"]
