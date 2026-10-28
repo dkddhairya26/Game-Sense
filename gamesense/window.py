@@ -182,6 +182,30 @@ class Viz(FigureCanvasQTAgg):
             if people and ax.lines:
                 ax.legend(facecolor="#182B42", edgecolor="#314B65", labelcolor="#EDF4FF", fontsize=9)
             ax.set_title("ROLLING FORM / LAST FIVE RECORDS", color="#D7E7F6", fontsize=10, loc="left", pad=15)
+        elif kind == "breakdown":
+            person = people[0] if people else None
+            fields = [m for m in SPORTS[sport]["metrics"] if m in df]
+            if person and fields:
+                row = df[df["competitor"] == person]
+                means = row[fields].apply(pd.to_numeric, errors="coerce").mean().dropna().sort_values()
+                if len(means):
+                    ax.barh([x.replace("_"," ").title() for x in means.index],
+                            means.values, color=accent, height=.52)
+            ax.set_title("PLAYER / TEAM METRIC PROFILE", color="#D7E7F6",fontsize=10,loc="left",pad=12)
+        elif kind == "seasons":
+            for i, person in enumerate(people):
+                person_df = df[df["competitor"] == person]
+                grouped = person_df.groupby("season")[metric].mean().sort_index()
+                if len(grouped):
+                    xs=list(range(len(grouped)))
+                    ax.plot(xs, grouped.values, marker="o", markersize=4,
+                            color=palette[i % len(palette)], linewidth=2.4, label=person)
+                    skip=max(1, len(xs)//7)
+                    ax.set_xticks(xs[::skip])
+                    ax.set_xticklabels([str(y) for y in grouped.index[::skip]],rotation=20)
+            if ax.lines:
+                ax.legend(facecolor="#182B42", edgecolor="#314B65", labelcolor="#EDF4FF", fontsize=8)
+            ax.set_title("SEASON-BY-SEASON EVOLUTION", color="#D7E7F6",fontsize=10,loc="left",pad=12)
         elif kind == "leaders":
             ranks = df.groupby("competitor")[metric].mean().dropna().nlargest(8).sort_values()
             if len(ranks):
@@ -359,12 +383,26 @@ class GameSenseWindow(QMainWindow):
         self.leaders = Viz(245)
         l2.addWidget(self.leaders)
         graphs.addWidget(p2, 2)
-        ov.addLayout(graphs,1)
+        ov.addLayout(graphs)
+        extra = QHBoxLayout()
+        p4,l4=panel("STATISTICAL BREAKDOWN")
+        self.breakdown = Viz(218)
+        l4.addWidget(self.breakdown)
+        extra.addWidget(p4,2)
+        p5,l5=panel("HISTORICAL SEASONS")
+        self.seasons_chart = Viz(218)
+        l5.addWidget(self.seasons_chart)
+        extra.addWidget(p5,3)
+        ov.addLayout(extra)
         insight_card, inslay = panel("GAME INSIGHT / WHAT THE DATA SHOWS")
         self.insight = label("", "content", wrap=True)
         inslay.addWidget(self.insight)
         ov.addWidget(insight_card)
-        self.pages.addWidget(overview)
+        scroll=QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(overview)
+        self.pages.addWidget(scroll)
 
         leaderboard = QWidget()
         ll = QVBoxLayout(leaderboard)
@@ -514,6 +552,8 @@ class GameSenseWindow(QMainWindow):
         self.trend.render(df,self.current_sport,selected,metric,"trend")
         self.leaders.render(df,self.current_sport,selected,metric,"leaders")
         self.comparison.render(df,self.current_sport,selected,metric,"compare")
+        self.breakdown.render(df,self.current_sport,selected,metric,"breakdown")
+        self.seasons_chart.render(self.data[self.current_sport],self.current_sport,selected,metric,"seasons")
         form=", ".join(f"{p}: {recent_form(df,p) if recent_form(df,p) is not None else 'N/A'}"
                        for p in selected)
         kind = ", ".join(sorted(df["record_type"].dropna().astype(str).unique())) if "record_type" in df else "imported records"
@@ -523,18 +563,29 @@ class GameSenseWindow(QMainWindow):
             "These ratings are GameSense indicators, not official athlete ratings. "
             "One NBA season row is not an individual game."
         )
-        ranks=rankings(df,self.current_sport)
+        ranks=self.extended_rankings(df)
         compare=ranks[ranks["competitor"].isin(selected)] if not ranks.empty else pd.DataFrame()
         if not compare.empty:
             compare=compare.set_index("competitor").drop(columns=["team"],errors="ignore").T.reset_index().rename(columns={"index":"Statistic"})
         self.fill_table(self.compare_table,compare.round(2) if not compare.empty else pd.DataFrame())
         self.fill_rankings()
 
+    def extended_rankings(self,df):
+        """Show EVERY present numeric metric, not only the five core sport ratings."""
+        ranked=rankings(df,self.current_sport)
+        extras=[name for name in df.columns
+                if name not in ranked.columns and name not in ("season","date","player_id")
+                and pd.api.types.is_numeric_dtype(df[name])]
+        if extras and not df.empty:
+            additional=df.groupby("competitor")[extras].mean().reset_index()
+            ranked=ranked.merge(additional,on="competitor",how="left")
+        return ranked
+
     def fill_rankings(self):
         if not hasattr(self,"rank_table"):
             return
         df=self.current()
-        rank=rankings(df,self.current_sport)
+        rank=self.extended_rankings(df)
         term=self.search.text().strip().casefold()
         if term and not rank.empty:
             rank=rank[rank["competitor"].astype(str).str.casefold().str.contains(term,regex=False)]
