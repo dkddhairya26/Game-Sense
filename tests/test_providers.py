@@ -53,3 +53,31 @@ def test_local_storage_keeps_source_attribution(tmp_path,monkeypatch):
 def test_coverage_declares_every_sport():
     assert set(providers.COVERAGE)=={"Soccer","NBA","AFL","F1"}
     assert "player" in providers.COVERAGE["Soccer"][1].lower()
+
+
+def test_afl_squiggle_only_completed_team_matches():
+    def fake(url):
+        if "q=teams" in url:
+            return {"teams": [{"id": 1, "name": "Red Lions"}, {"id": 2, "name": "Blue Sharks"}]}
+        return {"games": [
+            {"date": "2024-06-01T04:00:00Z", "complete": 100, "hteam": 1, "ateam": 2,
+             "hscore": 90, "ascore": 80, "hgoals": 14, "agoals": 12,
+             "hbehinds": 6, "abehinds": 8, "round": 5, "venue": "Test Oval"},
+            {"date": "2024-06-02", "complete": 50, "hteam": 1, "ateam": 2,
+             "hscore": 30, "ascore": 40}
+        ]}
+    df = providers.fetch_afl_season(2024, contact_email="tester@example.org", reader=fake)
+    assert len(df) == 2
+    home = df[df["competitor"] == "Red Lions"].iloc[0]
+    assert home["points_scored"] == 90
+    assert home["wins"] == 1
+    assert home["margin"] == 10
+    assert all(df["record_type"] == "team match")
+    cleaned, _ = clean_data(df, "AFL")
+    assert cleaned["rating"].notna().all()
+
+
+def test_afl_requires_contact_email():
+    import pytest
+    with pytest.raises(ValueError, match="contact email"):
+        providers.fetch_afl_season(2024, contact_email="")
