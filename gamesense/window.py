@@ -31,11 +31,11 @@ STYLES = {
 }
 
 STYLE = """
-QMainWindow, QWidget {background:#080E19; color:#E9F1FF; font:12px 'Segoe UI',Arial;}
+QMainWindow, QWidget#central {background:#080E19;}\nQWidget {color:#E9F1FF; font:12px 'Segoe UI',Arial;}\nQLabel {background:transparent;}
 QFrame#sidebar {background:#0E1726; border-right:1px solid #233349;}
 QFrame#card, QFrame#graphPanel, QFrame#filterPanel {background:#111E30; border:1px solid #24344C; border-radius:16px;}
 QFrame#card:hover {border:1px solid #435975;}
-QLabel#brand {font-size:27px; font-weight:900; letter-spacing:1px; color:white;}
+QLabel#brand {font-size:24px; font-weight:900; letter-spacing:1px; color:white;}
 QLabel#subtitle {color:#8299B6; font-size:11px;}
 QLabel#section {font-size:20px; font-weight:800; color:#F4F8FF;}
 QLabel#kpi {font-size:28px; font-weight:800; color:#F8FAFF;}
@@ -361,6 +361,7 @@ class GameSenseWindow(QMainWindow):
 
     def build(self):
         base = QWidget()
+        base.setObjectName("central")
         self.setCentralWidget(base)
         outer = QHBoxLayout(base)
         outer.setContentsMargins(0,0,0,0)
@@ -372,7 +373,7 @@ class GameSenseWindow(QMainWindow):
         sl = QVBoxLayout(side)
         sl.setContentsMargins(15,22,15,16)
         sl.setSpacing(7)
-        sl.addWidget(label("GAME  SENSE", "brand"))
+        sl.addWidget(label("GAMESENSE", "brand"))
         sl.addWidget(label("PERFORMANCE INTELLIGENCE", "subtitle"))
         sl.addSpacing(29)
         sl.addWidget(label("YOUR SPORTS", "eyebrow"))
@@ -586,6 +587,9 @@ class GameSenseWindow(QMainWindow):
         self.current_sport = sport
         style=STYLES[sport]
         self.hero.set_sport(sport)
+        # Every sport accents the *entire* navigation and controls, not only
+        # the hero artwork. Transparent labels keep panels visually seamless.
+        self.setStyleSheet(STYLE.replace("#24E6A4",style["accent"]))
         self.import_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
         self.download_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
         for key,btn in self.sport_buttons.items():
