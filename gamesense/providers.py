@@ -6,6 +6,7 @@ season download; network failures are reported rather than hidden.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -14,19 +15,19 @@ import pandas as pd
 COVERAGE = {
     "Soccer": ("OpenLigaDB · Bundesliga match/team results", "Team-level only. Volunteer-maintained; no complete player statistics."),
     "NBA": ("NBA Stats · season player averages", "NBA player-season aggregates where the NBA endpoint responds; older/advanced fields vary."),
-    "AFL": ("Imported licensed datasets", "No bundled historical player feed. Import a permitted AFL dataset to analyse it."),
+    "AFL": ("Squiggle API · team match results since approximately 2000", "Team match scores only. For disposals, tackles and player history, import a permitted dataset. A contact email is required by Squiggle."),
     "F1": ("Jolpica F1 · driver race results", "Race results back to 1950 where recorded; historical telemetry/lap data not complete."),
 }
 SOURCE_URLS = {
     "Soccer": "https://www.openligadb.de/lizenz",
     "NBA": "https://github.com/swar/nba_api",
-    "AFL": "https://www.afl.com.au/stats",
+    "AFL": "https://api.squiggle.com.au/",
     "F1": "https://github.com/jolpica/jolpica-f1",
 }
 
 
-def _get_json(url: str) -> object:
-    request = Request(url, headers={"User-Agent": "GameSenseDesktop/0.3 (+historical statistics explorer)", "Accept": "application/json"})
+def _get_json(url: str, user_agent: str = "GameSenseDesktop/0.4 (+historical statistics explorer)") -> object:
+    request = Request(url, headers={"User-Agent": user_agent, "Accept": "application/json"})
     try:
         with urlopen(request, timeout=25) as response:
             return json.load(response)
@@ -164,7 +165,58 @@ def fetch_nba_season(year: int) -> pd.DataFrame:
     return df[["date", "season", "competitor", "team", "record_type", *columns.values()]]
 
 
-def fetch_season(sport: str, year: int) -> tuple[pd.DataFrame, str]:
+def fetch_afl_season(year: int, contact_email: str | None = None, reader=None) -> pd.DataFrame:
+    """Squiggle AFL team-game scores; never pretends this is player-level data.
+
+    The Squiggle API mandates an identifying contact email in User-Agent.
+    This address is sent only to the Squiggle provider and is not persisted.
+    """
+    if not 2000 <= int(year) <= date.today().year:
+        raise ValueError("Squiggle match coverage is approximately 2000 onward.")
+    email = (contact_email or "").strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise ValueError("Squiggle requires a real contact email to identify API users.")
+    user_agent = f"GameSenseDesktop/0.4 contact={email}"
+    read = reader or (lambda url: _get_json(url, user_agent=user_agent))
+    games_payload = read(f"https://api.squiggle.com.au/?q=games;year={year}")
+    teams_payload = read(f"https://api.squiggle.com.au/?q=teams;year={year}")
+    if not isinstance(games_payload, dict) or not isinstance(teams_payload, dict):
+        raise RuntimeError("Unexpected Squiggle API response.")
+    clubs = {str(t["id"]): t.get("name", str(t["id"]))
+             for t in teams_payload.get("teams", []) if t.get("id") is not None}
+    def team_name(value):
+        return clubs.get(str(value), str(value or "Unknown"))
+    rows = []
+    for game in games_payload.get("games", []):
+        try:
+            complete = float(game.get("complete") or 0)
+        except (TypeError, ValueError):
+            continue
+        if complete < 100 or game.get("hscore") is None or game.get("ascore") is None:
+            continue
+        home = team_name(game.get("hteam"))
+        away = team_name(game.get("ateam"))
+        hscore, ascore = game["hscore"], game["ascore"]
+        for name, opponent, score, conceded, goals, behinds in [
+            (home, away, hscore, ascore, game.get("hgoals"), game.get("hbehinds")),
+            (away, home, ascore, hscore, game.get("agoals"), game.get("abehinds"))
+        ]:
+            rows.append({
+                "date": str(game.get("date") or "")[:10], "season": str(year),
+                "competitor": name, "team": name, "opponent": opponent,
+                "goals": goals, "behinds": behinds, "points_scored": score,
+                "points_against": conceded, "margin": score - conceded,
+                "wins": int(score > conceded), "draws": int(score == conceded),
+                "losses": int(score < conceded), "round": game.get("round"),
+                "venue": game.get("venue"), "event": f"{home} vs {away}",
+                "record_type": "team match",
+            })
+    if not rows:
+        raise ValueError(f"No completed Squiggle AFL matches for {year}.")
+    return pd.DataFrame(rows)
+
+
+def fetch_season(sport: str, year: int, contact_email: str | None = None) -> tuple[pd.DataFrame, str]:
     """Return records and an accurate provenance label for one season."""
     if sport == "F1":
         return fetch_f1_season(year), f"Jolpica F1 · {year} race results"
@@ -173,5 +225,5 @@ def fetch_season(sport: str, year: int) -> tuple[pd.DataFrame, str]:
     if sport == "Soccer":
         return fetch_soccer_season(year), f"OpenLigaDB · Bundesliga {year}/{year+1} TEAM match results"
     if sport == "AFL":
-        raise ValueError("No approved AFL historical feed configured. Import a licensed CSV/Excel dataset.")
+        return fetch_afl_season(year, contact_email), f"Squiggle API · {year} AFL TEAM match results"
     raise ValueError(f"Unsupported sport: {sport}")
