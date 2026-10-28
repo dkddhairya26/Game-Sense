@@ -182,6 +182,70 @@ class Viz(FigureCanvasQTAgg):
             if people and ax.lines:
                 ax.legend(facecolor="#182B42", edgecolor="#314B65", labelcolor="#EDF4FF", fontsize=9)
             ax.set_title("ROLLING FORM / LAST FIVE RECORDS", color="#D7E7F6", fontsize=10, loc="left", pad=15)
+        elif kind == "sport":
+            chosen = people[0] if people else None
+            subset = df[df["competitor"] == chosen] if chosen else df.iloc[0:0]
+            if subset.empty:
+                ax.text(.5,.5,"Select a competitor to explore",ha="center",va="center",
+                        transform=ax.transAxes,color="#B8CADD")
+            elif sport == "Soccer":
+                if {"wins","draws","losses"} <= set(subset.columns) and (
+                        "record_type" in subset and subset["record_type"].eq("team match").any()):
+                    totals = subset[["wins","draws","losses"]].apply(pd.to_numeric,errors="coerce").sum()
+                    if totals.sum() > 0:
+                        ax.pie(totals, labels=["Wins","Draws","Losses"],
+                               colors=[accent,"#6D90B8","#FF7292"], startangle=90,
+                               wedgeprops={"width":.34,"edgecolor":"#111E30"},
+                               textprops={"color":"#E5EEFC","fontsize":9})
+                        ax.text(0,0,str(int(totals.sum()))+"\nmatches",ha="center",va="center",
+                                color="white",fontsize=11,fontweight="bold")
+                else:
+                    metrics = [m for m in ["goals","assists","shots","passes","tackles"] if m in subset]
+                    avg = subset[metrics].apply(pd.to_numeric,errors="coerce").mean().dropna()
+                    ax.bar(avg.index.astype(str),avg.values,color=accent,alpha=.9)
+                    ax.tick_params(axis="x",labelrotation=20)
+                ax.set_title("FOOTBALL / FORM & ATTACK",color="#DBE8F8",fontsize=10,loc="left",pad=11)
+            elif sport == "F1":
+                if {"grid_position","finish_position"} <= set(subset.columns):
+                    grid = pd.to_numeric(subset["grid_position"],errors="coerce")
+                    finish = pd.to_numeric(subset["finish_position"],errors="coerce")
+                    valid = grid.notna() & finish.notna()
+                    if valid.any():
+                        ax.scatter(grid[valid],finish[valid],s=65,c=accent,alpha=.85,
+                                   edgecolors="#F6F9FF",linewidths=.5)
+                        mx=max(grid[valid].max(),finish[valid].max(),20)
+                        ax.plot([1,mx],[1,mx],color="#778CA6",linestyle="--",alpha=.6)
+                        ax.set_xlim(0,mx+1)
+                        ax.set_ylim(mx+1,0)
+                        ax.set_xlabel("Starting grid",color="#A6BAD3")
+                        ax.set_ylabel("Finishing position",color="#A6BAD3")
+                        ax.text(.03,.03,"Above the line = positions gained",color="#A8C2D8",
+                                transform=ax.transAxes,fontsize=8)
+                ax.set_title("RACECRAFT / GRID VS FINISH",color="#DBE8F8",fontsize=10,loc="left",pad=11)
+            else:
+                fields = (["points","rebounds","assists","steals","blocks"] if sport == "NBA"
+                          else ["disposals","marks","tackles","goals","clearances"])
+                metrics = [m for m in fields if m in subset]
+                avg = subset[metrics].apply(pd.to_numeric,errors="coerce").mean().dropna()
+                if len(avg):
+                    ax.bar([m.replace("_"," ").title() for m in avg.index],
+                           avg.values,color=accent,alpha=.9,width=.55)
+                    ax.tick_params(axis="x",labelrotation=19)
+                ax.set_title(("COURT / PLAYER STAT LINE" if sport == "NBA"
+                              else "OVAL / PLAYER STAT LINE"),
+                             color="#DBE8F8",fontsize=10,loc="left",pad=11)
+        elif kind == "quality":
+            fields = [m for m in df.select_dtypes(include="number").columns if m!="rating"]
+            if fields and len(df):
+                completeness = df[fields].notna().mean().sort_values().tail(8)
+                ax.barh([c.replace("_"," ").title() for c in completeness.index],
+                        completeness.values*100,color=accent,alpha=.85,height=.55)
+                ax.set_xlim(0,100)
+                ax.set_xlabel("Non-missing records (%)",color="#A6BAD3")
+            else:
+                ax.text(.5,.5,"No numeric stat columns available",ha="center",va="center",
+                        transform=ax.transAxes,color="#B8CADD")
+            ax.set_title("DATA QUALITY / METRIC COVERAGE",color="#DBE8F8",fontsize=10,loc="left",pad=11)
         elif kind == "breakdown":
             person = people[0] if people else None
             fields = [m for m in SPORTS[sport]["metrics"] if m in df]
@@ -394,6 +458,16 @@ class GameSenseWindow(QMainWindow):
         l5.addWidget(self.seasons_chart)
         extra.addWidget(p5,3)
         ov.addLayout(extra)
+        detail_row = QHBoxLayout()
+        p6,l6=panel("SPORT-SPECIFIC INTELLIGENCE")
+        self.sport_chart=Viz(220)
+        l6.addWidget(self.sport_chart)
+        detail_row.addWidget(p6,3)
+        p7,l7=panel("RECORD COMPLETENESS")
+        self.quality_chart=Viz(220)
+        l7.addWidget(self.quality_chart)
+        detail_row.addWidget(p7,2)
+        ov.addLayout(detail_row)
         insight_card, inslay = panel("GAME INSIGHT / WHAT THE DATA SHOWS")
         self.insight = label("", "content", wrap=True)
         inslay.addWidget(self.insight)
@@ -554,6 +628,8 @@ class GameSenseWindow(QMainWindow):
         self.comparison.render(df,self.current_sport,selected,metric,"compare")
         self.breakdown.render(df,self.current_sport,selected,metric,"breakdown")
         self.seasons_chart.render(self.data[self.current_sport],self.current_sport,selected,metric,"seasons")
+        self.sport_chart.render(df,self.current_sport,selected,metric,"sport")
+        self.quality_chart.render(df,self.current_sport,selected,metric,"quality")
         form=", ".join(f"{p}: {recent_form(df,p) if recent_form(df,p) is not None else 'N/A'}"
                        for p in selected)
         kind = ", ".join(sorted(df["record_type"].dropna().astype(str).unique())) if "record_type" in df else "imported records"
