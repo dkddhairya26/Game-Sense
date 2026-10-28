@@ -69,7 +69,7 @@ def fetch_f1_season(year: int, reader=None) -> pd.DataFrame:
                     "event": race.get("raceName"),
                     "points": result.get("points"), "finish_position": result.get("position"),
                     "grid_position": result.get("grid"), "laps": result.get("laps"),
-                    "fastest_lap": int(fastest.get("rank") == "1"),
+                    "fastest_lap": (int(fastest.get("rank") == "1") if fastest.get("rank") is not None else None),
                     "status": result.get("status"), "record_type": "race",
                 })
         if total == 0:
