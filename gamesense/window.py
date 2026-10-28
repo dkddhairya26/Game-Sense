@@ -273,7 +273,10 @@ class Viz(FigureCanvasQTAgg):
                 ax.legend(facecolor="#182B42", edgecolor="#314B65", labelcolor="#EDF4FF", fontsize=8)
             ax.set_title("SEASON-BY-SEASON EVOLUTION", color="#D7E7F6",fontsize=10,loc="left",pad=12)
         elif kind == "leaders":
-            ranks = df.groupby("competitor")[metric].mean().dropna().nlargest(8).sort_values()
+            averages = df.groupby("competitor")[metric].mean().dropna()
+            lower_better = sport == "F1" and metric in {"finish_position", "grid_position", "qualifying_position"}
+            ranks = (averages.nsmallest(8).sort_values(ascending=False)
+                     if lower_better else averages.nlargest(8).sort_values())
             if len(ranks):
                 bars = ax.barh(ranks.index.astype(str), ranks.values, color=accent, alpha=.9, height=.62)
                 for bar in bars:
@@ -715,7 +718,10 @@ class GameSenseWindow(QMainWindow):
             rank=rank[rank["competitor"].astype(str).str.casefold().str.contains(term,regex=False)]
         metric=self.metric_combo.currentText()
         if metric in rank:
-            rank=rank.sort_values(metric,ascending=False,na_position="last")
+            lower_better = self.current_sport == "F1" and metric in {
+                "finish_position", "grid_position", "qualifying_position"
+            }
+            rank=rank.sort_values(metric,ascending=lower_better,na_position="last")
         self.fill_table(self.rank_table,rank.round(2).head(700))
 
     @staticmethod
