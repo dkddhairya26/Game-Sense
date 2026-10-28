@@ -424,7 +424,7 @@ class GameSenseWindow(QMainWindow):
         sl.addStretch()
         self.sidebar_status = label("", "status", wrap=True)
         sl.addWidget(self.sidebar_status)
-        sl.addWidget(label("v0.4  •  HISTORICAL EDITION", "subtitle"))
+        sl.addWidget(label("v0.5  •  FULL HISTORY BETA", "subtitle"))
         outer.addWidget(side)
 
         body = QWidget()
