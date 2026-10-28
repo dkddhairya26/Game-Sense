@@ -2,7 +2,10 @@ name: Build public installers
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
+    paths:
+      - '.github/workflows/release.yml'
 permissions:
   contents: write
 jobs:
@@ -30,6 +33,19 @@ jobs:
         with:
           name: GameSense-Windows-Installer
           path: output/GameSenseSetup-Windows.exe
+      - name: Publish public unsigned Windows beta
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v0.4.0-beta.1"
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --target $env:GITHUB_SHA --prerelease --title "GameSense v0.4 beta" --notes "PREVIEW ONLY. Unsigned desktop installers. Real historical data coverage varies by sport and year. Demo records are fictional. Use at your own risk and report issues."
+            if ($LASTEXITCODE -ne 0) { Start-Sleep -Seconds 3; gh release view $tag }
+          }
+          gh release upload $tag output/GameSenseSetup-Windows.exe --clobber
       - name: Publish Windows installer on tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -65,6 +81,14 @@ jobs:
         with:
           name: GameSense-macOS-DMG
           path: GameSense-macOS.dmg
+      - name: Publish public unsigned macOS beta
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=v0.4.0-beta.1
+          gh release view "$TAG" || (gh release create "$TAG" --target "$GITHUB_SHA" --prerelease --title "GameSense v0.4 beta" --notes "PREVIEW ONLY. Unsigned desktop installers. Historical data coverage varies and demo records are fictional." || (sleep 3 && gh release view "$TAG"))
+          gh release upload "$TAG" GameSense-macOS.dmg --clobber
       - name: Publish macOS DMG on tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
