@@ -155,14 +155,42 @@ def fetch_nba_season(year: int) -> pd.DataFrame:
         "OREB": "offensive_rebounds", "DREB": "defensive_rebounds",
         "PLUS_MINUS": "plus_minus", "W": "wins", "L": "losses",
     }
+    # Preserve the entire numeric NBA base stat line, not just the five
+    # headline metrics. Unknown provider columns remain visible in Data Studio.
     columns = {a: b for a, b in fields.items() if a in raw}
+    reserved = {"PLAYER_NAME", "TEAM_ABBREVIATION", "TEAM_ID"}
+    for col in raw.columns:
+        if col not in columns and col not in reserved:
+            columns[col] = col.lower()
     df = raw.rename(columns=columns).copy()
+
+    # Advanced measures (usage, true shooting, efficiency, ratings etc.) are
+    # best-effort; NBA Stats may block calls or omit older historical seasons.
+    try:
+        advanced = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season, per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Advanced", timeout=30
+        ).get_data_frames()[0]
+        if not advanced.empty and "PLAYER_ID" in advanced and "player_id" in df:
+            names = [col for col in advanced.columns
+                     if col not in {"PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "TEAM_ABBREVIATION"}
+                     and pd.api.types.is_numeric_dtype(advanced[col])]
+            adv = advanced[["PLAYER_ID", *names]].rename(
+                columns={"PLAYER_ID": "player_id",
+                         **{col: "advanced_" + col.lower() for col in names}})
+            df = df.merge(adv.drop_duplicates("player_id"), how="left", on="player_id")
+            df["advanced_data_status"] = "available where recorded"
+        else:
+            df["advanced_data_status"] = "not returned by provider"
+    except Exception:
+        df["advanced_data_status"] = "NBA advanced endpoint unavailable"
     df["date"] = f"{year + 1}-06-30"
     df["season"] = season
     df["competitor"] = raw["PLAYER_NAME"]
     df["team"] = raw["TEAM_ABBREVIATION"]
     df["record_type"] = "player season (per-game averages)"
-    return df[["date", "season", "competitor", "team", "record_type", *columns.values()]]
+    leading = ["date", "season", "competitor", "team", "record_type"]
+    return df[leading + [col for col in df.columns if col not in leading and col not in reserved]]
 
 
 def fetch_afl_season(year: int, contact_email: str | None = None, reader=None) -> pd.DataFrame:
