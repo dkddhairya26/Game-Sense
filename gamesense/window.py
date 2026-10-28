@@ -883,7 +883,7 @@ class GameSenseWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No)
         if answer == QMessageBox.StandardButton.Yes:
-            self._start_download(remaining)
+            self._start_download(sorted(remaining,reverse=True))
 
     def download_season(self):
         if self._thread is not None:
@@ -901,7 +901,7 @@ class GameSenseWindow(QMainWindow):
                                     "These seasons are already stored locally. "
                                     "Choose additional years or refresh the current season.")
             return
-        self._start_download(years)
+        self._start_download(sorted(years,reverse=True))
 
     def _start_download(self,years):
         if self._thread is not None or not years:
@@ -980,6 +980,12 @@ class GameSenseWindow(QMainWindow):
             self.sources[sport]=" + ".join(providers)+" · locally cached real / imported data"
             storage.save(sport,merged,self.sources[sport])
             self._job_loaded+=1
+            # Show genuine players immediately, without waiting for decades of
+            # downloads to finish. Refresh at most once per five saved seasons.
+            if self.current_sport == sport and (
+                    self._job_loaded == 1 or self._job_loaded % 5 == 0):
+                self.change_sport(sport)
+                self.season.setCurrentIndex(0)
             self.archive_info.setText(
                 f"Saved {self._job_loaded} new {sport} seasons. "
                 f"Current local archive: {len(merged):,} records, "
