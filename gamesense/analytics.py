@@ -70,6 +70,16 @@ def clean_data(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
             + df.loc[clubs, "goals"].fillna(0)
             + .6 * df.loc[clubs, "goal_difference"].fillna(0)
         )
+    # AFL match scores are not athlete-level disposals or marks.
+    if sport == "AFL" and "record_type" in df and {"wins", "draws", "margin"} <= set(df.columns):
+        clubs = df["record_type"].eq("team match").fillna(False)
+        for col in ("wins", "draws", "margin"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        df.loc[clubs, "rating"] = (
+            4 * df.loc[clubs, "wins"].fillna(0)
+            + 2 * df.loc[clubs, "draws"].fillna(0)
+            + .08 * df.loc[clubs, "margin"].fillna(0)
+        )
     df = df.sort_values('date').reset_index(drop=True)
     return df, {'input_rows': original, 'duplicates_removed': duplicates, 'invalid_rows_removed': removed, 'valid_rows': len(df)}
 
