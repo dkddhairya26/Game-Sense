@@ -16,7 +16,7 @@ for sport in ("Soccer", "NBA", "AFL", "F1"):
     window.change_sport(sport)
     app.processEvents()
     assert window.kpi_widgets[0].text() != "—", sport
-    assert window.metric.count() > 0, sport
+    assert window.metric_combo.count() > 0, sport
     target = folder / ("GameSense-" + sport.replace(" ", "-") + ".png")
     assert window.grab().save(str(target)), target
     print(sport, "OK", target)
