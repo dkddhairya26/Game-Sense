@@ -1,0 +1,40 @@
+name: Verify GameSense UI and analytics
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app.py'
+      - 'gamesense/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - '.github/workflows/verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests-and-previews:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+      MPLBACKEND: QtAgg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install desktop dependencies and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Verify calculations and data-provider parsers
+        run: |
+          python -m pytest -q
+          python -m compileall -q app.py gamesense tests
+      - name: Launch native dashboard and capture four sport screenshots
+        run: python tests/render_preview.py
+      - name: Upload real UI preview images
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameSense-desktop-previews
+          path: previews/*.png
