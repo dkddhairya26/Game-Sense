@@ -36,6 +36,23 @@ def clean_data(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
         if metric not in df.columns:
             df[metric] = float('nan')  # Missing is NOT zero.
         df[metric] = pd.to_numeric(df[metric], errors='coerce')
+    # Preserve all supplied extra statistics. Convert numeric-looking fields while
+    # leaving names, IDs, competition labels and unknown categories untouched.
+    # This makes historical imports useful beyond the five default sport metrics.
+    protected = set(REQUIRED) | {"record_type", "event", "opponent", "status",
+                                  "position", "driver_id", "player_id", "team_id",
+                                  "source", "competition"}
+    for col in df.columns:
+        if col in protected or col.endswith("_id") or col in SPORTS[sport]["metrics"]:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        nonempty = df[col].notna().sum()
+        if not nonempty:
+            continue
+        values = pd.to_numeric(df[col], errors="coerce")
+        if values.notna().sum() / nonempty >= .95:
+            df[col] = values
     # A rating is only computed when at least one rating component is present.
     weights = SPORTS[sport]['weights']
     present = df[list(weights)].notna()
