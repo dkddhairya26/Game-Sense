@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
-    QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget,
+    QProgressBar, QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -635,9 +635,9 @@ class GameSenseWindow(QMainWindow):
             btn.style().unpolish(btn); btn.style().polish(btn)
 
     def change_sport(self,sport):
+        previous_sport = self.current_sport
         self.current_sport = sport
         style=STYLES[sport]
-        previous_sport = self.current_sport
         self.hero.set_sport(sport)
         # Every sport accents the *entire* navigation and controls, not only
         # the hero artwork. Transparent labels keep panels visually seamless.
@@ -847,73 +847,183 @@ class GameSenseWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self,"Import failed",str(exc))
 
+    def open_historical_library(self):
+        """Make real-data access discoverable from every sport dashboard."""
+        self.change_page(3)
+        self.start_year.setValue(EARLIEST[self.current_sport])
+        self.end_year.setValue(date.today().year)
+        self.archive_info.setText(
+            f"READY: {self.current_sport} has available provider seasons from "
+            f"{EARLIEST[self.current_sport]} onwards. Click LOAD ALL AVAILABLE YEARS "
+            "to retrieve and cache all seasons the provider actually returns. "
+            "Downloads run in the background and can be resumed."
+        )
+
+    def load_all_years(self):
+        """One action requests the entire historical provider range, not five years."""
+        if self._thread is not None:
+            return
+        sport=self.current_sport
+        start=EARLIEST[sport]
+        end=date.today().year
+        cached=cache_years(self.data[sport],sport) if not self.is_demo[sport] else set()
+        remaining=plan_years(sport,start,end,cached=cached)
+        if not remaining:
+            QMessageBox.information(self,"All downloaded",
+                                    "All supported seasons are already stored locally.")
+            return
+        answer=QMessageBox.question(
+            self, "Build real historical library",
+            f"Download all obtainable {sport} history from {start} through {end}?\n\n"
+            f"{len(remaining)} seasons are not yet cached or require a current-season refresh.\n\n"
+            f"Coverage: {GRAIN[sport]}.\n\n"
+            "This may make many requests and some years may be unavailable or blocked. "
+            "Completed years are saved immediately; you can stop and resume safely. "
+            "Fictional demo records will be replaced by real downloaded results.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self._start_download(remaining)
+
     def download_season(self):
         if self._thread is not None:
             return
         sport=self.current_sport
         start,end=self.start_year.value(),self.end_year.value()
-        if end<start:
-            QMessageBox.warning(self,"Invalid range","The end year must be on or after the start year.")
+        try:
+            cached=cache_years(self.data[sport],sport) if not self.is_demo[sport] else set()
+            years=plan_years(sport,start,end,cached=cached)
+        except ValueError as exc:
+            QMessageBox.warning(self,"Invalid historical range",str(exc))
             return
-        if end-start+1>5:
-            QMessageBox.information(self,"Use smaller batches",
-                "To protect free public data providers, GameSense downloads a maximum of "
-                "five seasons per batch. Choose a five-year range, then repeat for more history.")
+        if not years:
+            QMessageBox.information(self,"Already cached",
+                                    "These seasons are already stored locally. "
+                                    "Choose additional years or refresh the current season.")
             return
+        self._start_download(years)
+
+    def _start_download(self,years):
+        if self._thread is not None or not years:
+            return
+        sport=self.current_sport
+        contact=self.afl_email.text().strip() if sport=="AFL" else None
+        if sport=="AFL" and (not contact or "@" not in contact or "." not in contact):
+            QMessageBox.information(
+                self,"Squiggle contact email required",
+                "Squiggle requires an identifying contact email in API requests. "
+                "Enter yours in Data Studio; it is not saved by GameSense. "
+                "Squiggle supplies AFL TEAM match results only, not player statistics.")
+            self.change_page(3)
+            self.afl_email.setFocus()
+            return
+        self._job_sport=sport
+        self._job_loaded=0
+        self._job_summary=""
         self.download_btn.setEnabled(False)
-        self.download_btn.setText("Downloading...")
-        self.statusBar().showMessage(f"Downloading {sport} {start}–{end} from the data provider...")
-        contact = self.afl_email.text().strip() if sport=="AFL" else None
-        if sport=="AFL" and (not contact or "@" not in contact):
-            self.download_btn.setEnabled(True)
-            self.download_btn.setText("↓  Download up to 5 seasons")
-            QMessageBox.information(self,"Squiggle identification required",
-                "The Squiggle API requires a contact email in its User-Agent. "
-                "Enter an email in Data Studio before downloading AFL TEAM match results. "
-                "No email is needed to import your own AFL player data.")
-            return
-        self._thread=QThread()
-        self._worker=DownloadWorker(sport,start,end,contact)
+        self.all_years_btn.setEnabled(False)
+        self.real_btn.setEnabled(False)
+        self.import_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
+        self.download_btn.setText("Downloading history...")
+        self.archive_progress.setValue(0)
+        self.archive_info.setText(f"Fetching {len(years)} uncached {sport} seasons.")
+        self._thread=QThread(self)
+        self._worker=DownloadWorker(sport,years,contact)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.finished.connect(lambda df,source: self.receive_download(sport,df,source))
-        self._worker.failed.connect(lambda message: QMessageBox.warning(self,"Download not available",message))
-        self._worker.progress.connect(self.statusBar().showMessage)
+        self._worker.season_ready.connect(self.receive_download)
+        self._worker.progress.connect(self._download_progress)
+        self._worker.failed.connect(self._download_error)
+        self._worker.completed.connect(self._download_summary)
         self._worker.done.connect(self._thread.quit)
         self._worker.done.connect(self._worker.deleteLater)
         self._thread.finished.connect(self._download_complete)
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.start()
 
-    def _download_complete(self):
-        self._thread=None
-        self.download_btn.setText("↓  Download up to 5 seasons")
-        self.download_btn.setEnabled(True)
-        self.statusBar().showMessage("Ready",4000)
+    def cancel_download(self):
+        if self._thread is not None:
+            self._worker.cancel()
+            self.cancel_btn.setEnabled(False)
+            self.archive_info.setText(
+                "Stop requested. The current provider request may finish first; "
+                "completed years are already saved.")
 
-    def receive_download(self,sport,df,source):
-        existing=self.data[sport]
-        prev=self.sources[sport]
-        # Keep only same-provider data when extending a historical archive.
-        family=source.split(" · ")[0]
-        if not self.is_demo[sport] and prev.startswith(family):
-            merged=pd.concat([existing,df],ignore_index=True)
-            subset=["date","season","competitor","team"]
-            merged=merged.drop_duplicates(subset=subset,keep="last")
-            cleaned,_=clean_data(merged,sport)
+    def _download_progress(self,message,completed,total):
+        if self._job_sport:
+            self.statusBar().showMessage(message)
+            self.archive_progress.setValue(
+                min(100,int(completed*100/max(total,1))))
+            self.archive_info.setText(
+                message + f" — {self._job_loaded} successful seasons cached. "
+                "You can close this archive task using Stop.")
+
+    def _download_error(self,message):
+        self._job_summary=message
+
+    def _download_summary(self,message):
+        self._job_summary=message
+
+    def receive_download(self,df,source):
+        """Persist *each* successful year immediately for crash-safe resuming."""
+        sport=self._job_sport
+        if not sport:
+            return
+        existing=None if self.is_demo[sport] else self.data[sport]
+        try:
+            merged=merge_season(existing,df,sport,source)
+            self.data[sport]=merged
+            self.is_demo[sport]=False
+            all_sources=merged.get("data_source",pd.Series(dtype=str)).dropna().astype(str)
+            providers=sorted(set(value.split(" · ")[0] for value in all_sources))
+            self.sources[sport]=" + ".join(providers)+" · locally cached real / imported data"
+            storage.save(sport,merged,self.sources[sport])
+            self._job_loaded+=1
+            self.archive_info.setText(
+                f"Saved {self._job_loaded} new {sport} seasons. "
+                f"Current local archive: {len(merged):,} records, "
+                f"{len(cache_years(merged,sport))} provider seasons.")
+        except Exception as exc:
+            self._job_summary=f"Could not save {sport} data: {exc}"
+            self.cancel_download()
+
+    def _download_complete(self):
+        sport=self._job_sport
+        saved=self._job_loaded
+        message=self._job_summary
+        self._thread=None
+        self._worker=None
+        self._job_sport=None
+        self.download_btn.setText("↓  Load selected years")
+        self.download_btn.setEnabled(True)
+        self.all_years_btn.setEnabled(True)
+        self.real_btn.setEnabled(True)
+        self.import_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        if sport:
+            if self.current_sport==sport:
+                self.change_sport(sport)
+                self.season.setCurrentIndex(0)
+            n=len(cache_years(self.data[sport],sport))
+            self.archive_info.setText(
+                f"{sport} historical archive: {n} provider seasons, "
+                f"{len(self.data[sport]):,} saved records. {message}")
+        self.statusBar().showMessage("Historical request finished",7000)
+        QMessageBox.information(
+            self,"GameSense historical library",
+            f"{saved} newly downloaded season(s) saved.\n\n{message}\n\n"
+            "Only statistics actually recorded by the provider are shown. "
+            "Missing historical player metrics are not invented.")
+
+    def closeEvent(self,event):
+        if self._thread is not None:
+            self.cancel_download()
+            event.ignore()
+            self.statusBar().showMessage(
+                "Stopping historical download: close the app once the current request finishes.")
         else:
-            cleaned=df
-        self.data[sport]=cleaned
-        # Preserve the source label and any partially failed-season warning.
-        # Each downloaded row also carries its own data_source provenance.
-        self.sources[sport]=source+" · stored locally"
-        self.is_demo[sport]=False
-        storage.save(sport,cleaned,self.sources[sport])
-        self.change_sport(sport)
-        QMessageBox.information(self,"Historical data ready",
-                                f"Loaded {len(df):,} actual records for {sport}.\n"
-                                f"Local archive: {len(cleaned):,} records.\n"
-                                f"Source: {source}\n\nCoverage is limited to the fields provided.")
+            super().closeEvent(event)
 
     def export_file(self):
         path,_=QFileDialog.getSaveFileName(self,"Export filtered data","gamesense_export.csv","CSV (*.csv)")
