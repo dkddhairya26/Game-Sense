@@ -2,7 +2,15 @@ name: Build public installers
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
+    paths:
+      - 'app.py'
+      - 'gamesense/**'
+      - 'tests/**'
+      - 'requirements.txt'
+      - 'installer/**'
+      - '.github/workflows/release.yml'
 permissions:
   contents: write
 jobs:
@@ -15,8 +23,13 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Validate analytics and provider parsing
+        run: |
+          python -m pip install pytest
+          python -m pytest -q
+          python -m compileall -q app.py gamesense
       - name: Build Windows desktop app
-        run: python -m PyInstaller --noconfirm --clean --windowed --name GameSense --collect-all matplotlib app.py
+        run: python -m PyInstaller --noconfirm --clean --windowed --name GameSense --collect-all matplotlib --collect-all nba_api app.py
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Create Windows installer
@@ -43,8 +56,13 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Validate analytics and provider parsing
+        run: |
+          python -m pip install pytest
+          python -m pytest -q
+          python -m compileall -q app.py gamesense
       - name: Build Mac app
-        run: python -m PyInstaller --noconfirm --clean --windowed --name GameSense --collect-all matplotlib app.py
+        run: python -m PyInstaller --noconfirm --clean --windowed --name GameSense --collect-all matplotlib --collect-all nba_api app.py
       - name: Create DMG
         run: |
           mkdir -p dmg
