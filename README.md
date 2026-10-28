@@ -1,14 +1,14 @@
-# GameSense Desktop — Historical Edition (v0.4 development)
+# GameSense Desktop — Historical Archive Edition (v0.5 beta)
 
 GameSense is a **native PySide6 desktop application** for Windows and macOS. There is no Streamlit server and no browser-based analytics interface.
 
 ## What the desktop application does
 
-- Four distinct sports interfaces: **Soccer/Pitch, NBA/Court, AFL/Oval and F1/Race**.
+- Four distinct sports interfaces: **Soccer/Pitch, NBA/Court, AFL/Oval and F1/Race**. Dashboards default to **All seasons** instead of silently selecting 2023.
 - A premium dark dashboard with original vector sporting diagrams and six analytical visualisations: trends, leaderboards, stat breakdown, season history, sport-specific analytics and metric completeness.
 - Searchable, sortable rankings, head-to-head comparisons, season filtering and an event/player data explorer.
 - **Real, on-demand historical records** from supported data providers (not included in the installer).
-- Controlled downloads of **up to five seasons at a time** to reduce API abuse; repeat to build a local archive.
+- **Load ALL available years** from the Data Studio in one click (with explicit confirmation, visible progress and a Stop button). Jobs process one season at a time and immediately save each successful year, allowing safe resumption. Requests stop after throttling or repeated errors.
 - Import CSV, Excel and JSON with common player, team, year and stat header aliases.
 - Store downloaded/imported statistics locally in SQLite and export filtered records.
 - Clearly distinguish fictional offline demo records from downloaded records.
@@ -18,11 +18,11 @@ GameSense is a **native PySide6 desktop application** for Windows and macOS. The
 | Sport | Included real-data connector | Record grain | Available history | Limits |
 |---|---|---|---|---|
 | Soccer | OpenLigaDB | Bundesliga team/match result | 1963 onwards **where recorded** | Only Germany's Bundesliga, **not player-level**; no advanced xG feed |
-| NBA | NBA Stats via nba_api | One player-season row of *per-game averages* | Connector requests from 1996 onward | NBA endpoints may throttle/block; advanced stats vary by era |
+| NBA | NBA Stats via nba_api | Player-season rows of *per-game averages* | Basic player records **from 1946–47 where accessible** | NBA advanced stats begin 1996–97; steals/blocks/turnovers/three-pointers were not recorded in earlier eras; API may throttle/block |
 | AFL | Squiggle API | Australian rules **team** match results | Approximately 2000 onward | Requires user-supplied contact email in request User-Agent. No player stats via Squiggle |
 | F1 | Jolpica F1 | Driver race results | 1950 onward where recorded | Historical qualifying/laps/telemetry are not all present |
 
-**No provider can supply every historical statistic, every player and every year.** The application never fills unknown historical fields with made-up numbers. Use authorised source files to expand historical athlete coverage; check any provider's licensing before using those data in a publicly distributed product.
+**No connected provider can guarantee every historical statistic, every player and every year.** The application never fills unknown historical fields with made-up numbers. Use authorised source files to expand historical athlete coverage; check any provider's licensing before using those data in a publicly distributed product.
 
 Jolpica is non-commercial CC BY-NC-SA 4.0; [Jolpica terms](https://github.com/jolpica/jolpica-f1/blob/main/TERMS.md). Squiggle requires user identification and responsible caching; [Squiggle API](https://api.squiggle.com.au/). [nba_api source](https://github.com/swar/nba_api). [OpenLigaDB](https://www.openligadb.de/).
 
@@ -44,7 +44,7 @@ Download the Windows installer or macOS DMG from an **actual published GameSense
 
 The download page is at https://dkddhairya26.github.io/Game-Sense/ . **Do not claim a public installer is available until both release assets are attached and verified.**
 
-Downloaded/imported data are stored on the user's computer under `~/GameSenseData/gamesense.sqlite3`; raw provider requests occur only when the user initiates a download.
+The app does not preinstall decades of real player data: it initially displays clearly flagged fictional demo records. Users choose **GET REAL HISTORY → LOAD ALL AVAILABLE YEARS** or import a permitted dataset to build a true local archive. The archive is incremental; a download can be resumed without losing completed years. Some years may still be unavailable due to API access, provider coverage or historical gaps.\n\nDownloaded/imported data are stored on the user's computer under `~/GameSenseData/gamesense.sqlite3`; raw provider requests occur only when the user initiates a download.
 
 AFL Squiggle's required contact email is sent as the identifying request User-Agent only for AFL downloads. GameSense does not store the email.
 
