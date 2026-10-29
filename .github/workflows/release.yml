@@ -45,8 +45,8 @@ jobs:
           name: GameSense-${{ matrix.platform }}
           path: output/*
           if-no-files-found: error
-  draft-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  publish-preview:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: packages
     runs-on: ubuntu-latest
     permissions:
@@ -58,7 +58,7 @@ jobs:
           pattern: GameSense-*
           path: release-assets
           merge-multiple: true
-      - name: Create a new reviewable release without replacing existing assets
+      - name: Publish a new preview without replacing existing releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -66,6 +66,4 @@ jobs:
             echo "Release already exists; refusing to overwrite it. Use a new version tag."
             exit 1
           fi
-          release_flags=()
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then release_flags+=(--prerelease); fi
-          gh release create "$GITHUB_REF_NAME" release-assets/* --draft --verify-tag "${release_flags[@]}" --title "GameSense $GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md
+          gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --latest=false --verify-tag --title "GameSense $GITHUB_REF_NAME (preview)" --notes-file docs/RELEASE_NOTES.md

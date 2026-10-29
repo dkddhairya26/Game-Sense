@@ -34,12 +34,12 @@ source-version and replacement instructions in `QT_REDISTRIBUTION.md`. Preserve
 these notices and review the exact versions in the generated dependency record
 when redistributing a package.
 
-## Required release review
+## Release checks and current limits
 
 1. Run the complete automated suite and review provider/portrait rights and attribution. Do not bundle a private cache, restricted dataset or unlicensed team logo. Inspect the actual bundled `data/` content and its source manifests.
 2. Generate and visually inspect the major app screens at multiple sizes. Exercise search, season changes, profiles, comparisons, team views, charts, exports, downloads, cancellation and offline mode.
 3. Run `python scripts/check_package.py --installer output/GameSenseSetup-Windows.exe` on Windows or the equivalent DMG command on a Mac. The check report distinguishes automated startup from manual review. A source-mode pass does not prove the frozen app works.
-4. Test the visible installer and application on clean target machines without Python or a development environment. Verify Start Menu/desktop shortcuts, launch, user-data persistence and uninstallation. On macOS, copy into Applications and test the copied app.
+4. Manual visible installation and all interactions on clean end-user machines remain unverified. The preview records this limitation explicitly; automated clean-runner install/mount and startup checks provide the current installation evidence. On macOS those checks do not replace testing a manually copied Applications app.
 5. Review actual source coverage. Do not describe team-level AFL games as athlete records or promise telemetry/complete player history that the provider does not supply.
 6. Obtain Windows code signing and Apple Developer ID/notarisation credentials if trusted signed public distribution is required. No paid account or credential is assumed by these scripts.
 7. Record the version, commit, test results, build reports and checksums. Review limitations in the release notes.
@@ -56,7 +56,13 @@ review this preview against existing remote work before deciding on publication.
 
 `Build and verify desktop installers` can be run manually for artifacts or triggered by a tag such as `v0.6.0`. Tagged versions must match the build script version. Each platform installs dependencies, runs tests, builds an installer and checks installed/mounted startup. Both successful jobs upload artifacts and reports.
 
-After both jobs succeed for a version tag, a final job creates a **draft** GitHub Release with those exact assets. It fails if the release already exists rather than replacing working downloads. This keeps publication reviewable and avoids advertising half-built platform packages. Review the draft and reports, then publish after target-platform checks. A manual build does not create a public release.
+After both platform jobs succeed for an explicitly pushed version tag, the
+`publish-preview` job publishes a **new prerelease** with those exact assets,
+reports and hashes. It uses `--latest=false` and fails if the release already
+exists, preserving working releases and the latest stable selection. This
+implements the user's explicit request to package and publish a new application.
+Manual dispatches only build artifacts, even when dispatched against a tag; they
+do not publish. No additional approval gate is imposed by this workflow.
 
 The workflow's API permissions and repository access must exist on GitHub. No workflow success or publication is inferred just because the YAML is present. Do not force-push, delete existing releases or use `--clobber` to resolve a release collision; choose an appropriate new version instead.
 
@@ -69,7 +75,7 @@ a platform button only when the corresponding asset is returned:
 - `GameSenseSetup-Windows.exe`
 - `GameSense-macOS.dmg`
 
-Buttons use GitHub's returned `browser_download_url`; no guessed download URL is advertised as working. If the API is unavailable, rate limited or missing an asset, the page keeps that platform unavailable and links to the releases page. An older latest release can remain available until the new draft is published.
+Buttons use GitHub's returned `browser_download_url`; no guessed download URL is advertised as working. If the API is unavailable, rate limited or missing an asset, the page keeps that platform unavailable and links to the releases page. The existing configured release remains available until the new preview's assets have been published and the page tag is deliberately updated.
 
 After a reviewed new release has actually been published, explicitly update the
 configured tag. A local preview build does not change the public selection.

@@ -67,12 +67,13 @@ class AnalyticsChart(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMinimumHeight(340)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.figure = Figure(figsize=(8, 3.4), facecolor='#111f22', constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.canvas.setMinimumHeight(210)
+        self.canvas.setMinimumHeight(245)
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.toolbar.setStyleSheet('QToolBar {background: transparent; border:0;} QToolButton {padding:3px;} QToolButton:hover {background:#28423c;} QToolButton:checked {background:#36534c; border-radius:4px;}')
         for action in self.toolbar.actions():
@@ -87,6 +88,7 @@ class AnalyticsChart(QWidget):
         layout.addWidget(self.canvas, 1)
         self.explanation = QLabel('Choose a metric and downloaded records to explore.')
         self.explanation.setWordWrap(True)
+        self.explanation.setMinimumHeight(44)
         self.explanation.setStyleSheet('color:#9aafad; font-size:11px; padding:8px 12px;')
         layout.addWidget(self.explanation)
         self.plotted_data = pd.DataFrame()

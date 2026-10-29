@@ -15,6 +15,9 @@ Native offline smoke testing produced **20 successful screen cases** and
 **zero unhandled errors**. The result was independently read from the local
 `artifacts/qa/smoke-results.json`: `success: true`, `native_qt: true`,
 `offline: true`. Twenty PNG screenshots are present in `.qa/screenshots/`.
+The current source report also records four passing real-identity searches:
+Lionel Messi, LeBron James, Collingwood and Lewis Hamilton. These checks apply to
+the downloaded local test archive; a fresh bundled archive has fewer sources.
 
 The cases cover Overview; four sport dashboards and four sport profiles; soccer
 shot map; F1 grid/finish comparison; F1 pit-stop timeline; teams; comparisons;
@@ -47,12 +50,13 @@ preservation of the existing production uninstall registration. All 20 installed
 screen cases passed with zero unhandled errors. The report explicitly says
 `installer_kind: isolated_qa` and `production_installer_tested: false`.
 
-An optimized final rebuild is required after subsequent importer/calculation
-changes. Packaging now collects Matplotlib data plus the explicit QtAgg backend
-and excludes unused SciPy, Arrow and notebook modules. Record the final rebuilt
-installer's report and hash after it completes, rather than treating the first
-build's result as proof of later changes. No macOS build or installation on a Mac
-has been performed on this Windows workstation.
+That initial local build predates later importer/calculation/search changes.
+The final reviewed snapshot was subsequently rebuilt and verified by native CI
+on both operating systems, as described below. Optimized packaging collects
+Matplotlib data plus the explicit QtAgg backend and excludes unused SciPy, Arrow
+and notebook modules. The final CI artifacts are evidence for that reviewed
+snapshot; the earlier local package is not. macOS was built on GitHub's native
+Mac runner, not on this Windows workstation.
 
 An existing installed GameSense version was detected. The local installer checker
 therefore protects that installation. The separately compiled QA installer uses
@@ -87,13 +91,45 @@ new preview requires a deliberate subsequent tag update.
 
 The `Verify preview desktop packages` workflow runs for pull requests or a manual
 dispatch, building Windows and macOS artifacts and retaining test/package reports
-without creating or publishing a release. The tag-driven workflow creates a new
-reviewable draft after both platform checks succeed. No remote CI success is
-inferred from configuration alone.
+without creating or publishing a release. The tag-driven release workflow
+implements the user's publication request by publishing a new prerelease after
+both platform checks succeed, with `--latest=false` and an existing-release guard.
+Manual dispatch does not publish. No remote CI success is inferred from
+configuration alone.
 
 Pull request #1 reviews branch `codex/gamesense-0-6-preview`, snapshot
-`0b2d1ff`. Its actual cross-platform verification run is
-https://github.com/dkddhairya26/Game-Sense/actions/runs/40801779395.
-At the first monitoring check, both Windows and macOS jobs were installing
-dependencies with no completed artifacts. A running job is not a successful
-package; final conclusions and artifact links must be recorded after completion.
+`8a77952`. Its actual cross-platform verification run is
+https://github.com/dkddhairya26/Game-Sense/actions/runs/40802119873.
+The previous run `40801779395` was cancelled when superseded by this common-name
+search fix; it is not recorded as a successful build or a dependency failure.
+At the first monitoring check, both OS jobs were installing dependencies.
+The native Mac job subsequently completed successfully. Its actual log records
+`76 passed` and `26 subtests passed`, successful source screenshots, DMG creation,
+hdiutil image verification, and `Passed: dmg_mount, mounted_native_startup`.
+
+The Mac job is `123212581869`; artifact `12865909562` is named
+`GameSense-preview-macOS`. The artifact ZIP is 83,445,853 bytes with SHA-256
+`c3c2be76f27ced3795f5cb0913ebf8875a2f8bcec590bc492a05dd10809468d0`.
+The **DMG itself** has SHA-256
+`bc56d6abba553b9004b78bef5b95335e94420fc8313e5c5bd40f7b6b80ba5458`.
+The package remains unsigned by a trusted Developer ID and not notarised; manual
+clean-machine interaction remains unverified.
+
+The Windows job `123212582138` also completed successfully. Its log records
+`76 passed` and `26 subtests passed`, successful native screenshots and installer
+creation, then `Passed: silent_install, installed_native_startup,
+silent_uninstall, user_data_preserved`. This is an actual production-identity
+installation on a clean Windows runner, separate from the local isolated QA test.
+
+Windows artifact `12866418491` is named `GameSense-preview-Windows`. Its ZIP is
+68,466,735 bytes with SHA-256
+`52c07280cf08d453b93cded41d15ccb7000e704bde6a34cd28fd2867a3b53dae`.
+The **Windows installer itself** has SHA-256
+`5d2a302f4f9a0bf94f24564e6d7713fb6aa7a87e6cf60a44b0c58c349d47eed7`.
+Both platform artifacts correspond to source commit
+`8a77952249fe828252a74efb1f03ff5b84f2e502`.
+
+These hashes identify the verification-run files. A subsequent release build can
+have different bytes; use the SHA256SUMS files accompanying that release when
+checking its downloads. Both automated platform checks passed. Trusted signing,
+notarisation and manual interactive clean-machine tests remain unverified.

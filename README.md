@@ -70,7 +70,12 @@ python scripts/check_package.py --installer output/GameSenseSetup-Windows.exe
 
 On macOS use `--installer output/GameSense-macOS.dmg`. Checks run with isolated data and native offscreen startup; Windows can also verify silent install/uninstall. They do not replace visible clean-machine testing.
 
-The release workflow tests and builds on Windows/macOS, uploads artifacts and creates a **new draft release** for matching version tags. It refuses to overwrite an existing release. A reviewer must inspect artifacts and target-platform evidence before publishing. The Pages workflow serves `docs/`.
+The release workflow tests and builds on Windows/macOS, uploads artifacts and
+publishes a **new prerelease** for an explicitly pushed matching version tag after
+both platform jobs succeed. It refuses to overwrite an existing release and
+leaves the latest stable release unchanged. Manual workflow runs build artifacts
+without publishing. The Pages workflow serves `docs/`; its public download tag is
+updated only after the new installer assets exist.
 
 ## Documentation
 

@@ -10,7 +10,12 @@ The user's updated request prioritizes real historical data, real licensed portr
 
 Parallel engineering work covers an indexed historical archive and provider transport, native interface and analytical correctness, licensed Wikimedia portrait loading and native charts, plus release scripts/documentation. SQLite stores committed batches and provider/season coverage. Portrait requests require explicit licence evidence. Charts use observed measurements; field decorations are not presented as real event locations.
 
-Release scripts now generate original icons, version metadata and SHA-256 reports, create native packages only on their target OS and offer isolated package checks. The workflow assembles a new draft release only after both platform jobs succeed and refuses to overwrite an existing release. The public page checks GitHub's returned assets before enabling a platform download.
+Release scripts generate original icons, version metadata and SHA-256 reports,
+create native packages only on their target OS and offer isolated package checks.
+After both platform jobs succeed, an explicitly pushed version tag publishes a
+new prerelease without changing latest stable or replacing existing assets.
+Manual workflow runs build artifacts only. The public page checks GitHub's
+returned assets before enabling a platform download.
 
 ## Evidence and outcomes
 
@@ -23,12 +28,13 @@ This section records performed checks only; it must not be read as proof of plan
 | Inspect Windows packaging command | Completed with `python scripts/build.py --dry-run`; no package was built by that command. |
 | Download page activation logic | Actual page JavaScript evaluated in a Node VM: both valid published assets activate; missing assets, an untrusted download URL and a missing release leave buttons inactive. |
 | Windows Inno Setup availability at initial audit | Not found in PATH or the default Program Files (x86) location. A later installer build requires the compiler to be installed. |
-| Automated application/analytics/provider/chart tests | Reviewed preview snapshot: 75 tests plus 26 subtests passed, as reported by the main engineering session. |
+| Automated application/analytics/provider/chart tests | Reviewed preview snapshot: 76 tests plus 26 subtests passed, as reported by the main engineering session. |
 | Native screens and screenshots | Current `artifacts/qa/smoke-results.json` independently read: success=true, 20 successful cases, zero unhandled errors. Twenty screenshots present in `.qa/screenshots/`; includes 1440×960 and compact1040×760 rendering. |
-| Native executable/installer builds | First Windows build succeeded: production installer 116,588,433 bytes, unsigned/unpublished. Optimized rebuild pending subsequent source changes; final hash/report must be checked. |
+| Native executable/installer builds | First local Windows build succeeded: production installer 116,588,433 bytes, unsigned/unpublished. It predates later changes; final optimized CI builds for snapshot 8a77952 passed separately below. |
 | Packaged native startup | `output/package-check-Windows.json` independently read: application_only check passed, 20 screens, zero unhandled errors. Production install not claimed; isolated QA check separate. |
 | Preliminary isolated Windows QA installer | Actual QA report passed matching executable, silent install, native 20-screen startup, uninstall, user-data preservation and existing production-registration preservation. This is a separate QA AppId; production_installer_tested=false. |
-| macOS build and installation on a Mac | Not performed on this Windows workstation. CI configuration is provided; no successful Mac run is claimed. |
+| macOS CI package | Final snapshot 8a77952: tests, native screenshots, DMG creation, image verification and mounted native startup all passed on macos-latest, job 123212581869 / run 40802119873. Artifact 12865909562; manual interaction/notarisation remain unverified. |
+| Windows CI package | Same snapshot/run: job 123212582138 passed tests, native screenshots, installer creation, actual silent production install, native startup, uninstall and user-data preservation. Artifact 12866418491; manual interaction/trusted signing remain unverified. |
 | Public release publication | Not performed by the documentation/packaging work. Existing working releases were not replaced. |
 | Clean machine manual tests or student personal review | Not performed or inferred. |
 
@@ -46,8 +52,8 @@ recorded after the actual build and checks complete.
 
 The final source test and screen results are recorded in `VERIFICATION.md`.
 The first Windows production build succeeded and packaged startup passed.
-After subsequent importer/calculation changes, an optimized final rebuild is
-required; the initial build is not evidence for unbuilt later code.
+Subsequent importer/calculation/search changes were rebuilt and verified by native
+CI for snapshot 8a77952. The earlier local build is not evidence for those changes.
 Existing public 0.4/0.5 releases and the installed application are preserved.
 The isolated QA installer uses a separate identity for install/uninstall checks.
 A pull-request/manual Windows/macOS verification workflow now produces review
@@ -60,8 +66,17 @@ tags; latest/prerelease discovery is used only when a reviewer chooses an empty
 tag. The Pages workflow remains a main-branch deployment and has not been run by
 this work.
 
-The reviewed snapshot on pull request #1 is `0b2d1ff`, branch
-`codex/gamesense-0-6-preview`. Cross-platform run `40801779395` was started and is
-being monitored. Its first check showed both OS jobs installing dependencies,
-without a failure or completed artifact. No Mac success is claimed before that
-job completes.
+The reviewed snapshot on pull request #1 is `8a77952`, branch
+`codex/gamesense-0-6-preview`. The common-name search fix matches queries such as
+“Lionel Messi” to source names containing middle names while preserving stable
+identities. The local suite now passes 76 tests plus 26 subtests.
+Cross-platform run `40802119873` supersedes the cancelled earlier run
+`40801779395`. Its first check showed both OS jobs installing dependencies,
+without a failure or completed artifact. The Mac job subsequently completed
+successfully: 76 tests and 26 subtests, native rendering, DMG build and mounted
+startup. Windows subsequently passed its actual production-identity silent
+install, native startup, uninstall and user-data preservation checks. Both
+platform artifacts are available; exact IDs and file hashes are in
+`VERIFICATION.md`. The release workflow now follows the user's explicit
+publication authorization: tag pushes publish a new preview only after both
+platform jobs succeed; manual dispatch remains build-only.

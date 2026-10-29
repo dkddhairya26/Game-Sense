@@ -12,7 +12,7 @@ import pandas as pd
 from PySide6.QtCore import Qt, QObject, Signal, QRunnable, QThreadPool, QTimer, QSettings, QAbstractTableModel, QModelIndex, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QFont, QPainterPath, QLinearGradient, QIcon
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QPushButton, QComboBox, QLineEdit, QFileDialog, QMessageBox, QTableView, QFrame,
+    QPushButton, QComboBox, QLineEdit, QFileDialog, QMessageBox, QTableView, QFrame, QLayout,
     QStackedWidget, QScrollArea, QHeaderView, QProgressBar, QCheckBox, QTabWidget, QSpinBox)
 from .analytics import SPORTS, clean_data, metric_summary, season_history, leaderboard, is_rate
 from .importers import prepare_import
@@ -289,7 +289,7 @@ class GameSenseWindow(QMainWindow):
         nav.addWidget(label('SPORTS INTELLIGENCE', 'eyebrow'))
         nav.addSpacing(30)
         self.nav_buttons = {}
-        for key, title in [('home','Overview'), ('dashboard','Sport dashboard'), ('profiles','Athlete explorer'), ('teams','Teams & rosters'), ('compare','Head to head'), ('leaders','Leaderboards'), ('explorer','Historical records')]:
+        for key, title in [('home','Overview'), ('dashboard','Sport dashboard'), ('profiles','Athlete explorer'), ('teams','Teams and rosters'), ('compare','Head to head'), ('leaders','Leaderboards'), ('explorer','Historical records')]:
             btn = button(title, lambda checked=False, k=key: self.navigate(k))
             btn.setObjectName('nav')
             btn.setCheckable(True)
@@ -297,7 +297,7 @@ class GameSenseWindow(QMainWindow):
             nav.addWidget(btn)
         nav.addStretch()
         nav.addWidget(label('YOUR LIBRARY', 'eyebrow'))
-        for key, title in [('downloads', 'Data manager'), ('settings','Preferences'), ('about','Sources & about')]:
+        for key, title in [('downloads', 'Data manager'), ('settings','Preferences'), ('about','Sources and about')]:
             btn = button(title, lambda checked=False, k=key: self.navigate(k))
             btn.setObjectName('nav')
             btn.setCheckable(True)
@@ -344,6 +344,7 @@ class GameSenseWindow(QMainWindow):
             page_layout = QVBoxLayout(page)
             page_layout.setContentsMargins(0, 0, 0, 0)
             page_layout.setSpacing(16)
+            page_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(page)
@@ -386,6 +387,9 @@ class GameSenseWindow(QMainWindow):
         for i in range(len(frame.columns)):
             table.setColumnWidth(i, min(280, max(95, table.columnWidth(i))))
         table.horizontalHeader().setStretchLastSection(True)
+        # Keep the query's meaningful initial order. Qt otherwise sorts a fresh
+        # model by its first (often technical identifier) column automatically.
+        table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         table.setSortingEnabled(True)
 
     def _heading(self, layout, eyebrow, title, subtitle):
@@ -471,7 +475,7 @@ class GameSenseWindow(QMainWindow):
         self.athlete.currentIndexChanged.connect(self._load_profile)
         row = QHBoxLayout()
         row.addWidget(self.athlete, 1)
-        self.fav_button = button('☆ Favourite', self._toggle_favourite)
+        self.fav_button = button('Save favourite', self._toggle_favourite)
         row.addWidget(self.fav_button)
         row.addWidget(button('Retrieve missing history', lambda: self.navigate('downloads')))
         layout.addLayout(row)
@@ -855,6 +859,8 @@ class GameSenseWindow(QMainWindow):
             self._load_comparison()
         elif route == 'explorer':
             frame = self._query(limit=300, offset=self.page_offset)
+            front = [c for c in ['date','season','competitor','team','competition','event','record_kind'] + available_metrics(frame) if c in frame]
+            frame = frame[list(dict.fromkeys(front + list(frame.columns)))]
             self._fill(self.raw_table, frame)
             self.previous.setEnabled(self.page_offset > 0)
             self.next_page.setEnabled(len(frame) == 300)
@@ -886,6 +892,7 @@ class GameSenseWindow(QMainWindow):
         while layout.count():
             item = layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
             elif item.layout():
                 self._clear_layout(item.layout())
@@ -894,6 +901,7 @@ class GameSenseWindow(QMainWindow):
         self._clear_layout(layout)
         for index, (_, identity) in enumerate(identities.iterrows()):
             frame, inner = panel()
+            frame.setMinimumHeight(154)
             row = QHBoxLayout()
             portrait = PortraitWidget(size=58)
             is_team = identity.get('entity_type') == 'team'
@@ -964,7 +972,7 @@ class GameSenseWindow(QMainWindow):
         rows = [{'statistic':m, **metric_summary(data,m)} for m in metrics]
         self._fill(self.advanced_table, pd.DataFrame(rows))
         self.profile_sources.setText('\n\n'.join(f'{k}: ' + ', '.join(data[k].dropna().astype(str).unique()[:20]) for k in ['provider','source','source_url','license','record_type','record_kind','entity_type'] if k in data) + '\n\nProfile limit: 50,000 stored rows. Seasons without records are not assumed to have zero performance. Positions and percentages use averages; counting metrics use totals. Season rows require games played for per-game values.')
-        self.fav_button.setText('★ Favourited' if str(cid) in self._favourites() else '☆ Favourite')
+        self.fav_button.setText('Saved favourite' if str(cid) in self._favourites() else 'Save favourite')
         self._plot_profile()
 
     def _plot_profile(self, *_):
@@ -992,7 +1000,7 @@ class GameSenseWindow(QMainWindow):
         else:
             favourites.append(str(cid))
         self.settings.setValue('favourites', json.dumps(favourites))
-        self.fav_button.setText('★ Favourited' if str(cid) in favourites else '☆ Favourite')
+        self.fav_button.setText('Saved favourite' if str(cid) in favourites else 'Save favourite')
 
     def _load_comparison(self, *_):
         if not hasattr(self, 'compare_chart'):
@@ -1038,7 +1046,10 @@ class GameSenseWindow(QMainWindow):
             return
         metric = self.leader_metric.currentText()
         self.leader_frame = leaderboard(self.frame, metric, self.leader_total.isChecked())
-        self._fill(self.leader_table, self.leader_frame.head(500))
+        display = self.leader_frame.head(500).copy()
+        display.insert(0, 'rank', range(1, len(display)+1))
+        columns = [c for c in ['rank','competitor','team',metric,'records','competitor_id'] if c in display]
+        self._fill(self.leader_table, display[columns])
         self._feature_cards(self.leaders_featured, self.leader_frame.head(3))
 
     def _turn_page(self, direction):
