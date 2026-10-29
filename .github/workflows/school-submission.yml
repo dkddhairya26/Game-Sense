@@ -1,0 +1,79 @@
+name: Package GameSense final school submission
+on:
+  push:
+    branches: [feature/gamesense-final-submission-packaging]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  submission:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact published v0.10 source
+        uses: actions/checkout@v4
+        with:
+          ref: v0.10.0-beta.1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download actual published installers and verification evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v0.10.0-beta.1
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease
+          mkdir -p output
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir output \
+            --pattern '*.exe' --pattern '*.dmg' \
+            --pattern 'SHA256SUMS-*.txt' \
+            --pattern 'build-report-*.json' \
+            --pattern 'package-check-*.json' \
+            --pattern 'test-results-*.xml'
+          ls -lh output
+      - name: Assemble exact rubric-named complete Canvas ZIP
+        run: |
+          set -euo pipefail
+          # Checkout HEAD is the tag's underlying COMMIT, rather than the
+          # annotated tag object. This is the SHA recorded by both builds.
+          SOURCE_SHA=$(git rev-parse HEAD)
+          python scripts/package_submission.py \
+            --ref "$SOURCE_SHA" \
+            --tag v0.10.0-beta.1 \
+            --artifacts output \
+            --evidence evidence/final_acceptance \
+            --output 'output/Dhiraj Dhairya – Project.zip'
+      - name: Assemble small fallback source-and-evidence ZIP
+        run: |
+          set -euo pipefail
+          python scripts/package_submission.py \
+            --ref "$(git rev-parse HEAD)" \
+            --tag v0.10.0-beta.1 \
+            --evidence evidence/final_acceptance \
+            --source-only \
+            --output 'output/Dhiraj Dhairya – Source and Evidence Only.zip'
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          for f in Path('output').glob('Dhiraj Dhairya*zip'):
+              with zipfile.ZipFile(f) as z:
+                  assert z.testzip() is None
+                  names=set(z.namelist())
+                  assert 'source/PROPOSAL_ALIGNMENT.md' in names
+                  assert 'source/ALGORITHMS.md' in names
+                  assert 'source/TEST_REPORT.md' in names
+                  assert 'verification/RELEASE_MANIFEST.json' in names
+                  print(f.name, f.stat().st_size, 'bytes,', len(names), 'members verified')
+          PY
+      - name: Upload two school submission packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameSense-Final-Canvas-Submission-v0.10
+          path: |
+            output/Dhiraj Dhairya – Project.zip
+            output/Dhiraj Dhairya – Source and Evidence Only.zip
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
