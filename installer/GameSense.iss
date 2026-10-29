@@ -9,12 +9,12 @@
   #define AppFolder "GameSense"
   #define InstallerFile "GameSenseSetup-Windows"
 #endif
-#define AppVersion "0.8.0"
+#define AppVersion "0.9.0"
 [Setup]
 AppId={#AppIdentity}
 AppName={#AppName}
 AppVersion={#AppVersion}
-VersionInfoVersion=0.8.0.0
+VersionInfoVersion=0.9.0.0
 AppPublisher=GameSense
 AppPublisherURL=https://github.com/dkddhairya26/Game-Sense
 AppSupportURL=https://github.com/dkddhairya26/Game-Sense/issues
