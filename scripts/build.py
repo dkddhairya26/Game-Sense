@@ -70,7 +70,7 @@ def pyinstaller_command() -> list[str]:
                "--workpath", str(ROOT / 'build' / ('native-' + VERSION)),
                "--windowed", "--onedir", "--name", "GameSense",
                "--icon", str(ROOT / "assets" / icon),
-               "--collect-data", "matplotlib",
+               "--collect-data", "matplotlib", "--collect-all", "nba_api",
                "--hidden-import", "matplotlib.backends.backend_qtagg",
                "--exclude-module", "PyQt5", "--exclude-module", "PyQt6",
                "--exclude-module", "PySide2", "--exclude-module", "tkinter",
