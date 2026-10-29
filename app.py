@@ -66,6 +66,14 @@ def main():
                 QTimer.singleShot(100, step)
                 return
             if not pages:
+                bundled_root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
+                cc0_seed = bundled_root / 'data' / 'seed_soccer_cc0.jsonl.gz'
+                if cc0_seed.exists():
+                    real_club_rows = window.archive.count('Soccer',provider='openfootball')
+                    if real_club_rows < 7500:
+                        unhandled.append(
+                            f'Historical football starter missing from local archive: '
+                            f'expected >=7,500 real club rows, found {real_club_rows:,}.')
                 search_checks = []
                 examples = {'Soccer':('statsbomb:5503','Lionel Messi'), 'NBA':('nba:2544','LeBron James'), 'AFL':('squiggle:team:4','Collingwood'), 'F1':('f1db:lewis-hamilton','Lewis Hamilton')}
                 for sport, (identity, query) in examples.items():
