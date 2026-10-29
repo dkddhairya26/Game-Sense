@@ -26,8 +26,8 @@ sys.path.insert(0, str(ROOT))  # Running python scripts/build_football_seed.py f
 from gamesense import providers as _providers
 from gamesense.openfootball_provider import DEFAULT_LEAGUES, REPO, fixture_records
 DEST = ROOT / "data" / "seed_soccer_cc0.jsonl.gz"
-FIRST = 2015
-LAST = 2025
+FIRST = 2010
+LAST = 2026  # 2026-27 results only when the match has actually finished
 
 
 def fetch(year: int, code: str):
