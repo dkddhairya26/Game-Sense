@@ -4,6 +4,29 @@ Native desktop sports analytics for **football/soccer, NBA, AFL and Formula 1**.
 
 Version **[0.6.0-beta.1](https://github.com/dkddhairya26/Game-Sense/releases/tag/v0.6.0-beta.1)** is a published preview, built from commit `920f3af` after native Windows and macOS checks passed. Earlier releases are preserved. Coverage is determined by the selected provider and records actually downloaded; it does **not** include every athlete, metric or historical event across all four sports. AFL team results remain labelled as team results. Missing measurements and unavailable telemetry are not fabricated. Fictional records are confined to an explicitly labelled demonstration mode.
 
+## GameSense v0.9 — Club profiles fixed across leagues and years
+
+Aston Villa (historical "Aston Villa" and current "Aston Villa FC") now uses
+one stable, country-scoped CLUB identity, shared across the Premier League
+and Championship seasons. Upgrading an existing archive reconciles old IDs
+without erasing actual match data. The "Players & clubs" explorer displays
+real club W/D/L, scores, goal difference, league points, dated fixtures and
+season-by-league match summaries, instead of empty athlete-only goals/xG
+boxes. "Show full downloaded club history" ignores the global season/league
+filter for a verified career overview. The identity picker itself honours
+the selected league/year.
+
+Installer packaging also requests the **CC0 OpenFootball** completed club
+match results for published 2010–11 to 2026–27 seasons, spanning both top
+divisions and supported second divisions. Upstream files vary by year. The
+source contains *club results only*, not each footballer's lineups, goals,
+assists or xG. For player-specific records, use separate approved athlete
+providers. Other sports and optional AFL player source remain available.
+
+See [v0.9 release notes](docs/RELEASE_NOTES.md) for precise rights and
+coverage limitations. Tests validate the actual Aston Villa EPL +
+Championship career profile in the packaged native application.
+
 ## GameSense v0.8 — historic European clubs and AFL athlete stats
 
 The v0.8 development branch addresses reports that Football showed only
