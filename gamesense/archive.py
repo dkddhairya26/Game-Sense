@@ -135,9 +135,9 @@ class Archive:
             changed=con.total_changes-before
         return changed
 
-    def query(self, sport, season=None, competitor_id=None, limit=1000, offset=0, entity_type=None, provider=None, team=None):
+    def query(self, sport, season=None, competitor_id=None, limit=1000, offset=0, entity_type=None, provider=None, team=None, competition=None):
         clauses, args = ['sport=?'], [sport]
-        for column, value in [('season', season), ('competitor_id', competitor_id), ('entity_type', entity_type), ('provider', provider), ('team', team)]:
+        for column, value in [('season', season), ('competitor_id', competitor_id), ('entity_type', entity_type), ('provider', provider), ('team', team), ('competition', competition)]:
             if value is not None and value not in ('All seasons', ''):
                 clauses.append(column + '=?')
                 args.append(str(value))
@@ -153,9 +153,12 @@ class Archive:
         frame['date'] = pd.to_datetime(frame['date'], errors='coerce', utc=True).dt.tz_localize(None)
         return frame
 
-    def search(self, sport, text='', limit=100, first_season=None, last_season=None):
+    def search(self, sport, text='', limit=100, first_season=None, last_season=None, competition=None):
         # Escape LIKE syntax, so names containing %/_ remain literal searches.
         clauses, args = ['sport=?'], [sport]
+        if competition and competition != 'All competitions':
+            clauses.append('competition=?')
+            args.append(str(competition))
         # Source names can include middle names (e.g. Lionel Andrés Messi).
         # Match every literal token without merging distinct stable identities.
         for token in str(text).split():
@@ -178,6 +181,13 @@ class Archive:
     def seasons(self, sport):
         with self.connect() as con:
             return [row[0] for row in con.execute('SELECT DISTINCT season FROM records WHERE sport=? ORDER BY season DESC', (sport,))]
+
+    def competitions(self, sport):
+        """List actual competitions with stored records, never guessed leagues."""
+        with self.connect() as con:
+            return [row[0] for row in con.execute(
+                "SELECT DISTINCT competition FROM records WHERE sport=? "
+                "AND competition<>'' ORDER BY competition COLLATE NOCASE", (sport,))]
 
     def stats(self, sport):
         with self.connect() as con:
