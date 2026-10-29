@@ -19,7 +19,7 @@ import zipfile
 
 from .archive import data_directory
 from .http import Cancelled
-from .providers import Provider, ProviderMeta, _base, _client
+from .provider_base import Provider, ProviderMeta, _base, _client
 
 ARCHIVE_URL = "https://codeload.github.com/akareen/AFL-Data-Analysis/zip/refs/heads/main"
 REPO_URL = "https://github.com/akareen/AFL-Data-Analysis"
