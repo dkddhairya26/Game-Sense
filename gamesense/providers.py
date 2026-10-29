@@ -471,6 +471,50 @@ class StatsBombProvider(Provider):
             entity_type='athlete',record_kind='event',spatial_source='StatsBomb 120x80 event coordinates',
             **values) for values in self.aggregate_match(match,events,lineups)]
 
+    def download_ronaldo_2022(self, archive, client=None, progress=None):
+        """Fetch only Ronaldo's actual Portugal 2022 World Cup match records.
+
+        This *does not* claim his entire career or any unauthorised competitions.
+        Uses StatsBomb's publicly accessible research/noncommercial World Cup
+        match/event files and never bundles/re-exports the raw source.
+        """
+        client=_client(client)
+        catalogue=self.competitions(client)
+        competition=next(
+            (c for c in catalogue if int(c.get('competition_id',-1))==43
+             and int(c.get('season_id',-1))==106),None)
+        if competition is None:
+            raise RuntimeError('2022 World Cup not in the live StatsBomb catalogue')
+        matches=client.get_json(self.base+'matches/43/106.json')
+        portugal=[m for m in matches
+                  if 'portugal' in (
+                      str((m.get('home_team') or {}).get('home_team_name',''))+' '+
+                      str((m.get('away_team') or {}).get('away_team_name',''))
+                  ).casefold()]
+        if not portugal:
+            raise ValueError('StatsBomb returned no Portugal World Cup 2022 matches.')
+        records=[]
+        for index,match in enumerate(portugal,1):
+            client.check()
+            all_rows=self._match_rows(competition,match,client)
+            selected=[row for row in all_rows
+                      if 'cristiano' in str(row.get('competitor','')).casefold()
+                      and 'ronaldo' in str(row.get('competitor','')).casefold()]
+            if selected:
+                records.extend(selected)
+                archive.upsert(selected)
+            if progress:
+                progress(index,len(portugal),
+                         f'Portugal 2022 · {index}/{len(portugal)} real matches scanned')
+        if not records:
+            raise ValueError(
+                'No verified Cristiano Ronaldo match record found in StatsBomb '
+                'Portugal 2022 files. Nothing was invented.')
+        archive.mark(self.meta.id,'Soccer','2022','partial',
+                     'Cristiano Ronaldo Portugal World Cup matches only; '
+                     'not all players, competitions or career seasons')
+        return len(records)
+
     def download_match(self, archive, match_id, competition_id=43, season_id=106, client=None, cancel=None):
         """Download a genuine single match, retaining partial-season coverage."""
         client=_client(client,cancel)
