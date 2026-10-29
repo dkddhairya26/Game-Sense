@@ -17,7 +17,7 @@ import threading
 
 from .archive import data_directory
 from .http import Cancelled, HttpClient
-from .providers import Provider, ProviderMeta, _base, _client
+from .provider_base import Provider, ProviderMeta, _base, _client
 
 REPO = "https://raw.githubusercontent.com/openfootball/football.json/master"
 CATALOGUE = "https://api.github.com/repos/openfootball/football.json/contents"
