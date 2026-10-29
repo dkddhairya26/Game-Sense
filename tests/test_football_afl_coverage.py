@@ -135,3 +135,37 @@ def test_afl_research_project_unverified_source_rights():
 def test_openfootball_major_leagues_are_present():
     assert {"en.1","es.1","de.1","it.1","fr.1"} <= set(LEAGUES)
     assert len(LEAGUES)>=12
+
+
+def test_archive_league_selector_returns_only_existing_competitions(tmp_path):
+    archive=Archive(tmp_path/"league-filter.sqlite")
+    epl=fixture_records({"matches":[
+        {"date":"2023-08-12","team1":"Chelsea FC","team2":"Liverpool FC",
+         "score":{"ft":[1,1]}}]}, "2023-24", "en.1")
+    liga=fixture_records({"matches":[
+        {"date":"2023-08-12","team1":"Real Madrid","team2":"Barcelona",
+         "score":{"ft":[2,0]}}]}, "2023-24", "es.1")
+    archive.upsert(epl+liga)
+    competitions=archive.competitions("Soccer")
+    assert "English Premier League" in competitions
+    assert "Spanish La Liga" in competitions
+    assert archive.count("Soccer")==4
+    only_liga=archive.query("Soccer",competition="Spanish La Liga")
+    assert len(only_liga)==2
+    assert set(only_liga["competitor"])=={"Real Madrid","Barcelona"}
+    names=archive.search("Soccer",competition="English Premier League")
+    assert "Chelsea FC" in names["competitor"].tolist()
+    assert "Real Madrid" not in names["competitor"].tolist()
+
+
+def test_only_actual_final_matches_enter_league_archive():
+    src={"matches":[
+        {"date":"2026-11-01","team1":"Future Team","team2":"Other",
+         "score":{"ft":[3,2]}},
+        {"date":"2025-09-04","team1":"Completed","team2":"Opposition",
+         "score":{"ft":[0,0]}},
+        {"date":"2025-09-05","team1":"No Score","team2":"No Result","score":None}
+    ]}
+    rows=fixture_records(src,"2025-26","en.1",today=date(2026,10,29))
+    assert len(rows)==2
+    assert {r["competitor"] for r in rows}=={"Completed","Opposition"}
