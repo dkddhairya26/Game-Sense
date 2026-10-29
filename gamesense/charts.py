@@ -14,7 +14,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.figure import Figure
 from matplotlib import dates as mdates
 from matplotlib.patches import Arc, Circle, Ellipse, Rectangle
-from .analytics import is_rate, lower_is_better, metric_summary
+from .analytics import SPORTS, is_rate, lower_is_better, metric_summary, game_counts
 
 MODES = ['Season trend', 'Event timeline', 'Rolling average', 'Ranking',
          'Distribution', 'Scatter', 'Radar', 'Heatmap', 'Box plot', 'Cumulative total',
@@ -47,16 +47,23 @@ def title(metric):
 
 
 def _record_average(frame, metric):
-    """Use source denominators for rates when provided; never add percentages."""
-    if is_rate(metric):
-        value = metric_summary(frame, metric)['average']
-        return float(value) if value is not None else np.nan
-    return numeric_values(frame, metric).mean()
+    """Put season totals and games on the same per-game comparison scale.
+
+    A 2,000-point season is not one 2,000-point game. The denominator follows
+    the metric's observed rows, so a missing value never contributes a zero.
+    Percentages use actual attempts in ``metric_summary`` when supplied.
+    """
+    summary=metric_summary(frame,metric)
+    value=summary['average'] if is_rate(metric) else summary['per_game']
+    if value is None:
+        kinds=frame.get('record_kind',pd.Series('',index=frame.index)).fillna('').astype(str)+' '+frame.get('record_type',pd.Series('',index=frame.index)).fillna('').astype(str)
+        if not is_rate(metric) and kinds.str.contains('season|career',case=False,regex=True).any():
+            return np.nan
+        value=summary['average']
+    return float(value) if value is not None else np.nan
 
 
 def _grouped_average(frame, keys, metric):
-    if not is_rate(metric):
-        return frame.groupby(keys, sort=True)['_value'].mean()
     return frame.groupby(keys, sort=True).apply(
         lambda group: _record_average(group, metric), include_groups=False)
 
@@ -136,7 +143,7 @@ class AnalyticsChart(QWidget):
     def _remember(self, artist, xvalues, yvalues, labels, identities):
         self._hover_items.append((artist, list(xvalues), list(yvalues), list(labels), list(identities)))
 
-    def plot(self, df, sport, people=None, metric=None, mode='Season trend', secondary_metric=None):
+    def plot(self, df, sport, people=None, metric=None, mode='Season trend', secondary_metric=None, cohort=False):
         theme = THEMES.get(sport, THEMES['Soccer'])
         self.figure.clear()
         self.figure.set_facecolor(theme['background'])
@@ -180,6 +187,7 @@ class AnalyticsChart(QWidget):
             return
         palette = [theme['accent'], theme['secondary'], '#e1c383', '#bc9ce8', '#74c7c2', '#e795aa']
         chart_title = f'{title(metric)}  /  {mode}'
+        partial_seasons=set(df.loc[df.get('season_status',pd.Series('',index=df.index)).eq('ongoing_partial'),'season'].astype(str)) if 'season' in df else set()
         ax.set_title(chart_title, loc='left', fontsize=12, fontweight='bold', pad=19, color='#edf7f3')
         explanation = 'Values are from the selected source records; missing observations are excluded.'
 
@@ -198,14 +206,16 @@ class AnalyticsChart(QWidget):
                     y = values.to_numpy()
                     labels = [str(s) for s in values.index]
                     stride = max(1, int(np.ceil(len(labels)/10)))
-                    ax.set_xticks(x[::stride], labels[::stride], rotation=25 if len(labels) > 10 else 0)
+                    ax.set_xticks(x[::stride], [value+' *' if value in partial_seasons else value for value in labels[::stride]], rotation=25 if len(labels) > 10 else 0)
                     pieces.append(pd.DataFrame({'competitor_id': identity, 'competitor': names[identity],
                                                 'season': labels, 'mean_' + metric: y}))
-                    explanation = 'Mean per source record in each season; rates use source denominators where available. Gaps mean no observation, rather than zero.'
+                    explanation = 'Per-game counts in each season, using actual games played; rates use source denominators where available. Gaps mean unavailable observations, not zero.'
                 else:
                     if 'date' not in rows:
                         continue
                     kinds = rows.get('record_type', rows.get('record_kind', pd.Series('event', index=rows.index))).fillna('event').astype(str)
+                    if 'record_kind' in rows:
+                        kinds=kinds+' '+rows['record_kind'].fillna('').astype(str)
                     seasonal = kinds.str.contains('season|career', case=False, regex=True)
                     if seasonal.any() and not seasonal.all():
                         self._fallback(df, sport, people, 'This selection mixes event and season records; they cannot form one event timeline.')
@@ -219,15 +229,21 @@ class AnalyticsChart(QWidget):
                     y = rows['_value'].to_numpy()
                     labels = rows['season'].astype(str).tolist() if seasonal.all() and 'season' in rows else [str(d.date()) for d in x]
                     if mode == 'Rolling average':
-                        y = (np.array([_record_average(rows.iloc[max(0,i-4):i+1], metric) for i in range(len(rows))])
-                             if is_rate(metric) else pd.Series(y).rolling(5, min_periods=1).mean().to_numpy())
-                        explanation = 'Trailing mean of up to five observed records per athlete, in date order; rates use source denominators where available.'
+                        y = np.array([_record_average(rows.iloc[max(0,i-4):i+1], metric) for i in range(len(rows))])
+                        explanation = 'Trailing average of up to five recorded observations; counts use actual games and rates use source denominators. A seasonal source describes recent seasons, not the last five matches.'
                     elif mode == 'Cumulative total':
                         if is_rate(metric):
                             self._empty(ax, 'Cumulative totals are unavailable for percentages, rates and positions. Choose an additive metric.')
                             return
+                        averaged=kinds.reindex(rows.index).str.contains(r'per.?game|average',case=False,regex=True)
+                        if averaged.any():
+                            games=game_counts(rows)
+                            if (games[averaged].isna() | games[averaged].le(0)).any():
+                                self._empty(ax,'Season averages need actual games played before a cumulative total can be calculated.')
+                                return
+                            y=np.where(averaged,y*games,y)
                         y = np.cumsum(y)
-                        explanation = 'Running sum of observed source values. Interpret only additive totals, with consistent record units.'
+                        explanation = 'Running sum of recorded additive totals. Season per-game averages are multiplied by their actual games played; rounded source averages can make reconstructed totals approximate.'
                     export = pd.DataFrame({'competitor_id': identity, 'competitor': names[identity],
                                            'date': rows['_date'].to_numpy(), metric: y})
                     for provenance in ('season', 'date_precision', 'record_kind', 'record_type'):
@@ -251,7 +267,7 @@ class AnalyticsChart(QWidget):
                     ax.fill_between(x, y, alpha=.07, color=palette[idx % len(palette)])
                 self._remember(artist, x, y, [f'{names[identity]} · {label}\n{title(metric)}: {value:,.3g}' for label, value in zip(labels, y)], [identity]*len(y))
             self.plotted_data = pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame()
-            ax.set_ylabel(title(metric))
+            ax.set_ylabel(title(metric)+(' · per observed game' if mode=='Season trend' and not is_rate(metric) else ''))
             kinds = selection.get('record_type', selection.get('record_kind', pd.Series('event', index=selection.index))).fillna('event').astype(str)
             season_axis = mode == 'Season trend' or kinds.str.contains('season|career', case=False, regex=True).all()
             ax.set_xlabel('Season' if season_axis else 'Date of source record')
@@ -262,7 +278,7 @@ class AnalyticsChart(QWidget):
             positions = list(range(len(means)))
             bars = ax.barh(positions, means, color=theme['accent'], height=.59)
             ax.set_yticks(positions, [display_names[k] for k in means.index])
-            ax.set_xlabel(title(metric) + ' · mean per source record')
+            ax.set_xlabel(title(metric) + (' · per observed game' if not is_rate(metric) else ' · measured average'))
             for bar, identity, value in zip(bars, means.index, means):
                 ax.annotate(f'{value:,.2f}', (bar.get_width(), bar.get_y()+bar.get_height()/2),
                             xytext=(7, 0), textcoords='offset points', va='center', color='#d9ebe5', fontsize=9)
@@ -271,18 +287,21 @@ class AnalyticsChart(QWidget):
                                [f'{names[identity]}\nMean {title(metric)}: {value:,.3g}'], [identity])
             ax.margins(x=.2)
             self.plotted_data = pd.DataFrame({'competitor_id': means.index, 'competitor': [names[k] for k in means.index], 'mean_' + metric: means.values})
-            explanation = 'Ranked source-record means; rates use source denominators where available. Lower-is-better metrics rank the lowest observed average first.'
+            explanation = 'Ranked per-game counts or measured rates, using actual source denominators. Lower-is-better metrics rank the lowest observed average first.'
 
         elif mode == 'Distribution':
-            for idx, (identity, rows) in enumerate(selection.groupby('_identity', sort=False)):
-                if idx >= 6:
-                    break
-                ax.hist(rows['_value'], bins='auto', color=palette[idx], alpha=.5, label=names[identity], edgecolor=theme['background'])
+            if cohort:
+                ax.hist(selection['_value'],bins='auto',color=theme['accent'],alpha=.7,edgecolor=theme['background'])
+            else:
+                for idx, (identity, rows) in enumerate(selection.groupby('_identity', sort=False)):
+                    if idx >= 6:
+                        break
+                    ax.hist(rows['_value'], bins='auto', color=palette[idx], alpha=.5, label=names[identity], edgecolor=theme['background'])
             ax.set_xlabel(title(metric))
             ax.set_ylabel('Observed records')
-            shown = selection['_identity'].drop_duplicates().head(6)
+            shown = selection['_identity'].drop_duplicates() if cohort else selection['_identity'].drop_duplicates().head(6)
             self.plotted_data = selection.loc[selection['_identity'].isin(shown)].drop(columns=['_value', '_identity'])
-            explanation = 'Distribution of actual metric values for up to six athletes, with automatic histogram bins. No missing records are filled.'
+            explanation = ('Distribution across every selected observed player-season row, with automatic bins; missing values excluded.' if cohort else 'Distribution of actual metric values for up to six athletes, with automatic histogram bins. No missing records are filled.')
 
         elif mode == 'Scatter':
             others = [m for m in metrics if m != metric]
@@ -292,21 +311,29 @@ class AnalyticsChart(QWidget):
                 return
             selection['_other'] = numeric_values(selection, secondary_metric)
             selection = selection.dropna(subset=['_other'])
-            for idx, (identity, rows) in enumerate(selection.groupby('_identity', sort=False)):
-                if idx >= 6:
-                    break
-                artist = ax.scatter(rows['_value'], rows['_other'], s=34, alpha=.78,
-                                    color=palette[idx], label=names[identity], picker=7, edgecolors='none')
-                self._remember(artist, rows['_value'], rows['_other'],
-                               [f'{names[identity]}\n{title(metric)}: {a:,.3g}\n{title(secondary_metric)}: {b:,.3g}' for a, b in zip(rows['_value'], rows['_other'])], [identity]*len(rows))
+            if cohort:
+                artist=ax.scatter(selection['_value'],selection['_other'],s=28,alpha=.6,color=theme['accent'],picker=7,edgecolors='none')
+                self._remember(artist,selection['_value'],selection['_other'],
+                    [f'{name}\n{title(metric)}: {a:,.3g}\n{title(secondary_metric)}: {b:,.3g}' for name,a,b in zip(selection['competitor'],selection['_value'],selection['_other'])],selection['_identity'])
+            else:
+                for idx, (identity, rows) in enumerate(selection.groupby('_identity', sort=False)):
+                    if idx >= 6:
+                        break
+                    artist = ax.scatter(rows['_value'], rows['_other'], s=34, alpha=.78,
+                                        color=palette[idx], label=names[identity], picker=7, edgecolors='none')
+                    self._remember(artist, rows['_value'], rows['_other'],
+                                   [f'{names[identity]}\n{title(metric)}: {a:,.3g}\n{title(secondary_metric)}: {b:,.3g}' for a, b in zip(rows['_value'], rows['_other'])], [identity]*len(rows))
             ax.set_xlabel(title(metric))
             ax.set_ylabel(title(secondary_metric))
-            shown = selection['_identity'].drop_duplicates().head(6)
+            shown = selection['_identity'].drop_duplicates() if cohort else selection['_identity'].drop_duplicates().head(6)
             self.plotted_data = selection.loc[selection['_identity'].isin(shown)].drop(columns=['_value', '_identity', '_other'])
             explanation = 'Each point is one source record with both metrics observed; correlation does not establish causation.'
 
         elif mode == 'Radar':
-            radar_metrics = metrics[:6]
+            club=selection.get('entity_type',pd.Series(dtype=str)).eq('team').all()
+            preferred=(['goals','goals_against','goal_difference','table_points','win'] if sport=='Soccer' and club else
+                       ['points','points_against','goals','behinds','margin','win'] if sport=='AFL' and club else SPORTS[sport]['metrics'])
+            radar_metrics=[key for key in preferred if key in metrics][:6]
             means = pd.DataFrame({m: work.groupby('_identity').apply(lambda group: _record_average(group, m), include_groups=False) for m in radar_metrics})
             radar_metrics = [m for m in radar_metrics if means[m].notna().sum() >= 2]
             if len(radar_metrics) < 3:
@@ -329,7 +356,7 @@ class AnalyticsChart(QWidget):
             ax.set_yticks([25, 50, 75, 100])
             ax.grid(color='#8aa9aa', alpha=.2)
             self.plotted_data = percentile.loc[percentile.index.intersection(chosen)].reset_index().rename(columns={'_identity': 'competitor_id'})
-            explanation = 'Percentile of each athlete’s source-record mean within this downloaded cohort; average ties. Selected lower-is-better metrics are reversed. These are GameSense percentiles, not official ratings.'
+            explanation = 'GameSense percentiles within the displayed cohort, using per-game counts and attempt-weighted rates. Ties share average ranks; lower-is-better metrics are reversed. With two competitors this is a relative two-person comparison, not a league ranking.'
 
         elif mode == 'Heatmap':
             if 'season' not in selection:
@@ -373,6 +400,8 @@ class AnalyticsChart(QWidget):
         if self.plotted_data.empty:
             self._empty(ax, 'No plottable observations for this chart and selection.')
             return
+        if partial_seasons:
+            explanation+=' * Incomplete source snapshot(s): '+', '.join(sorted(partial_seasons))+'. Later results are not included.'
         self._message(explanation)
         if mode != 'Radar':
             self._annotation = ax.annotate('', xy=(0, 0), xytext=(14, 14), textcoords='offset points',

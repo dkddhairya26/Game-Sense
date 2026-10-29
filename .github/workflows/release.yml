@@ -32,6 +32,17 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q --junitxml=output/test-results-${{ matrix.platform }}.xml
+      - name: Verify pinned redistributable starter and render native source screens
+        env:
+          QT_QPA_PLATFORM: offscreen
+          GAMESENSE_DATA_DIR: ${{ runner.temp }}/gamesense-final-smoke
+        run: |
+          python -c "from pathlib import Path; assert Path('data/seed_soccer_cc0.jsonl.gz').stat().st_size > 1000000, 'Verified club seed must be committed with release source'"
+          python app.py --smoke-test --screenshots output/screenshots-${{ matrix.platform }}
+      - name: Run final native acceptance cases
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python scripts/final_acceptance.py --output output/acceptance-${{ matrix.platform }}
       - name: Install Inno Setup
         if: runner.os == 'Windows'
         run: choco install innosetup --no-progress -y
@@ -58,6 +69,8 @@ jobs:
           pattern: GameSense-*
           path: release-assets
           merge-multiple: true
+      - name: Package actual cross-platform verification evidence
+        run: python scripts/package_evidence.py --artifacts release-assets --output release-assets/GameSense-Verification-Evidence.zip
       - name: Publish a new preview without replacing existing releases
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,4 +79,6 @@ jobs:
             echo "Release already exists; refusing to overwrite it. Use a new version tag."
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" release-assets/* --prerelease --latest=false --verify-tag --title "GameSense $GITHUB_REF_NAME (preview)" --notes-file docs/RELEASE_NOTES.md
+          test -s release-assets/GameSenseSetup-Windows.exe
+          test -s release-assets/GameSense-macOS.dmg
+          gh release create "$GITHUB_REF_NAME" release-assets/*.exe release-assets/*.dmg release-assets/*.txt release-assets/*.json release-assets/*.xml release-assets/*.zip --prerelease --latest=false --verify-tag --title "GameSense $GITHUB_REF_NAME (Final Analytics Beta)" --notes-file docs/RELEASE_NOTES.md

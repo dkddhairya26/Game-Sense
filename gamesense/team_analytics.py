@@ -5,6 +5,7 @@ league standings snapshots, duplicate opponent rows, or unspecified player
 goals. Group by competition AND season to avoid merging divisions or cups.
 """
 from __future__ import annotations
+import numpy as np
 import pandas as pd
 
 
@@ -31,28 +32,72 @@ def club_matches(frame: pd.DataFrame, sport: str) -> pd.DataFrame:
         return work.iloc[:0]
     work["_for"] = _number_column(work, scored)
     work["_against"] = _number_column(work, conceded)
-    work = work.dropna(subset=["_for", "_against"])
+    work = work.loc[np.isfinite(work["_for"]) & np.isfinite(work["_against"])
+                    & work["_for"].ge(0) & work["_against"].ge(0)].copy()
     if "record_id" in work:
-        work = work.drop_duplicates("record_id")
+        # A missing ID does not mean two different matches are duplicates.
+        duplicate = work["record_id"].notna() & work["record_id"].duplicated()
+        work = work.loc[~duplicate]
     work["_win"] = (work["_for"] > work["_against"]).astype(int)
     work["_draw"] = (work["_for"] == work["_against"]).astype(int)
     work["_loss"] = (work["_for"] < work["_against"]).astype(int)
-    return work
+    return work.reset_index(drop=True)
+
+
+def _result_run(results, target):
+    """Return current and longest consecutive W/L runs in observed order."""
+    longest = run = 0
+    for result in results:
+        run = run + 1 if result == target else 0
+        longest = max(longest, run)
+    return run, longest
+
+
+def _sample_summary(work: pd.DataFrame) -> dict:
+    n = len(work)
+    return {"matches": n, "wins": int(work["_win"].sum()),
+            "draws": int(work["_draw"].sum()), "losses": int(work["_loss"].sum()),
+            "scored": float(work["_for"].sum()) if n else None,
+            "conceded": float(work["_against"].sum()) if n else None,
+            "win_rate": 100 * float(work["_win"].mean()) if n else None}
 
 
 def club_summary(frame: pd.DataFrame, sport: str) -> dict:
-    """Compute supported observed club match totals, not player contributions."""
+    """Describe observed matches, preserving score and date completeness.
+
+    Last-five/ten and streaks use dated matches only, oldest to newest. They
+    describe the selected archive, not unobserved fixtures between those dates.
+    AFL's scoring percentage is 100*points_for/points_against (not goal accuracy).
+    A zero denominator leaves this undefined rather than displaying infinity.
+    """
     work = club_matches(frame, sport)
     if work.empty:
         return {"matches":0,"wins":0,"draws":0,"losses":0,
                 "scored":None,"conceded":None,"difference":None,
-                "league_points":None,"win_rate":None,"leagues":0,"seasons":0}
+                "league_points":None,"win_rate":None,"leagues":0,"seasons":0,
+                "avg_scored":None,"avg_conceded":None,"scoring_percentage":None,
+                "goals":None,"behinds":None,"form":"","last5":None,"last10":None,
+                "home":None,"away":None,"current_winning_streak":0,
+                "current_losing_streak":0,"max_winning_streak":0,
+                "max_losing_streak":0,"dated_matches":0}
     scored = float(work["_for"].sum())
     conceded = float(work["_against"].sum())
     wins = int(work["_win"].sum())
     draws = int(work["_draw"].sum())
     games = len(work)
-    return {
+    # Do not manufacture match chronology from a season sort marker.
+    dates = pd.to_datetime(work.get("date", pd.Series(pd.NaT, index=work.index)),
+                           errors="coerce", utc=True, format="mixed")
+    precise = ~work.get("date_precision", pd.Series("day", index=work.index)).eq("season")
+    dated = work.loc[dates.notna() & precise].copy()
+    dated["_date"] = dates.loc[dated.index]
+    dated = dated.sort_values("_date", kind="stable")
+    results = ["W" if w else "D" if d else "L"
+               for w, d in zip(dated["_win"], dated["_draw"])]
+    current_w, max_w = _result_run(results, "W")
+    current_l, max_l = _result_run(results, "L")
+    venues = work.get("home_away", pd.Series("", index=work.index)).fillna("").str.lower()
+    result = {
         "matches": games, "wins":wins, "draws":draws,
         "losses": int(work["_loss"].sum()),
         "scored":scored, "conceded":conceded,
@@ -66,9 +111,25 @@ def club_summary(frame: pd.DataFrame, sport: str) -> dict:
             and _number_column(work,"table_points").notna().all() else None
         ),
         "win_rate": 100*wins/games,
+        "avg_scored": scored/games,
+        "avg_conceded": conceded/games,
+        "scoring_percentage": 100*scored/conceded if sport=="AFL" and conceded>0 else None,
+        "form": "".join(results[-10:]),
+        "last5": _sample_summary(dated.tail(5)) if len(dated) else None,
+        "last10": _sample_summary(dated.tail(10)) if len(dated) else None,
+        "home": _sample_summary(work.loc[venues.isin(["home", "h"])]) if venues.isin(["home", "h"]).any() else None,
+        "away": _sample_summary(work.loc[venues.isin(["away", "a"])]) if venues.isin(["away", "a"]).any() else None,
+        "current_winning_streak":current_w, "current_losing_streak":current_l,
+        "max_winning_streak":max_w, "max_losing_streak":max_l,
+        "dated_matches":len(dated),
         "leagues":work.get("competition",pd.Series(dtype=str)).dropna().nunique(),
         "seasons":work.get("season",pd.Series(dtype=str)).dropna().nunique(),
     }
+    for key in ("goals", "behinds"):
+        values = _number_column(work,key)
+        # A partially measured statistic is not a complete selected-period total.
+        result[key] = float(values.sum()) if values.notna().all() and len(values) else None
+    return result
 
 
 def club_season_table(frame: pd.DataFrame, sport: str) -> pd.DataFrame:

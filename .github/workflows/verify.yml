@@ -1,19 +1,8 @@
-name: Verify preview desktop packages
+name: Verify final desktop source
 on:
   push:
-    branches:
-      - feature/real-club-profiles-v09
+    branches: [codex/gamesense-final-assessment]
   pull_request:
-    paths:
-      - 'app.py'
-      - 'gamesense/**'
-      - 'tests/**'
-      - 'assets/**'
-      - 'data/**'
-      - 'scripts/**'
-      - 'installer/**'
-      - 'requirements.txt'
-      - '.github/workflows/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,13 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            platform: Windows
-            installer: GameSenseSetup-Windows.exe
-          - os: macos-latest
-            platform: macOS
-            installer: GameSense-macOS.dmg
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,67 +23,18 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: python -m pip install -r requirements.txt pytest
-      - name: Assemble verified CC0 European league starter records
-        run: python scripts/build_football_seed.py
-      - name: Check analytics, providers, portraits and chart rendering
+      - name: Verify analytics and native behavior
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q --junitxml=output/test-results-${{ matrix.platform }}.xml
-      - name: Render native source screenshots
+        run: python -m pytest -q --junitxml=output/tests-${{ matrix.os }}.xml
+      - name: Exercise final native acceptance cases
         env:
           QT_QPA_PLATFORM: offscreen
-          GAMESENSE_DATA_DIR: ${{ runner.temp }}/gamesense-preview-data
-        run: python app.py --smoke-test --screenshots output/screenshots
-      - name: Install Inno Setup
-        if: runner.os == 'Windows'
-        run: choco install innosetup --no-progress -y
-      - name: Build native installer
-        run: python scripts/build.py --installer
-      - name: Check packaged native startup and installer
-        run: python scripts/check_package.py --installer output/${{ matrix.installer }} --report output/package-check-${{ matrix.platform }}.json
-      - name: Retain review artifacts
+        run: python scripts/final_acceptance.py --output output/acceptance-${{ matrix.os }}
+      - name: Retain review evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GameSense-preview-${{ matrix.platform }}
+          name: GameSense-source-${{ matrix.os }}
           path: output/**
           if-no-files-found: warn
-
-  publish-v09-preview:
-    name: Publish separately versioned unsigned preview
-    if: github.ref == 'refs/heads/feature/real-club-profiles-v09'
-    needs: [verify]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: GameSense-preview-*
-          path: release-assets
-          merge-multiple: true
-      - name: Publish only after two verified installers exist
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG=v0.9.0-beta.1
-          test -s release-assets/GameSenseSetup-Windows.exe
-          test -s release-assets/GameSense-macOS.dmg
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Preview already published; refusing to overwrite signed or public artifacts."
-            exit 1
-          fi
-          gh release create "$TAG" \
-            release-assets/GameSenseSetup-Windows.exe \
-            release-assets/GameSense-macOS.dmg \
-            release-assets/SHA256SUMS-Windows.txt \
-            release-assets/SHA256SUMS-macOS.txt \
-            release-assets/build-report-Windows.json \
-            release-assets/build-report-macOS.json \
-            release-assets/package-check-Windows.json \
-            release-assets/package-check-macOS.json \
-            --target "$GITHUB_SHA" \
-            --prerelease --latest=false \
-            --title "GameSense 0.9.0 (Cross-League Club Profiles & Real Results Beta)" \
-            --notes-file docs/RELEASE_NOTES.md

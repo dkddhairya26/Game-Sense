@@ -25,7 +25,7 @@ def main():
     from gamesense.archive import data_directory
     app = QApplication([sys.argv[0]])
     app.setApplicationName('GameSense')
-    app.setApplicationVersion('0.9.0')
+    app.setApplicationVersion('0.10.0')
     app.setOrganizationName('GameSense')
     # Qt's offscreen platform does not enumerate Windows fonts. Load the system
     # face explicitly for reproducible screenshot QA; no font is redistributed.

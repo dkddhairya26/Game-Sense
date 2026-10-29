@@ -1,0 +1,507 @@
+{
+  "generated_at": "2026-10-29T10:12:57+00:00",
+  "platform": "Windows 11",
+  "python": "3.14.3",
+  "qt": "6.12.0",
+  "native_qt": true,
+  "qt_platform": "offscreen",
+  "offline": true,
+  "production_database_modified": false,
+  "actual_afl_rows_copied_into_qa": 10658,
+  "cases": [
+    {
+      "case": "Offline first startup",
+      "expected": "Fresh isolated archive loads the real licensed starter without network requests.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "coverage": {
+          "Soccer": {
+            "records": 108962,
+            "competitors": 410,
+            "teams": 456,
+            "seasons": 17,
+            "first_season": "2010-11",
+            "last_season": "2026-27",
+            "bytes": 298762240
+          },
+          "NBA": {
+            "records": 2673,
+            "competitors": 927,
+            "teams": 30,
+            "seasons": 5,
+            "first_season": "2022-23",
+            "last_season": "2026-27",
+            "bytes": 298762240
+          },
+          "AFL": {
+            "records": 0,
+            "competitors": 0,
+            "teams": 0,
+            "seasons": 0,
+            "first_season": null,
+            "last_season": null,
+            "bytes": 298762240
+          },
+          "F1": {
+            "records": 27687,
+            "competitors": 860,
+            "teams": 184,
+            "seasons": 77,
+            "first_season": "1950",
+            "last_season": "2026",
+            "bytes": 298762240
+          }
+        },
+        "screenshot": "01-offline-startup.png"
+      }
+    },
+    {
+      "case": "Honest fresh-install AFL state",
+      "expected": "No invented AFL player or club statistics before a permitted source is downloaded.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "records": 0,
+        "state": "AFL is an on-demand archive; a fresh install explains the absence.",
+        "screenshot": "02-afl-fresh-archive-empty.png"
+      }
+    },
+    {
+      "case": "Aston Villa cross-league identity and filters",
+      "expected": "One stable club profile has actual EPL and Championship results; disabling full history applies league and season filters.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "stable_id": "openfootball:club:en:aston-villa",
+        "full_history_matches": 545,
+        "championship_selected_matches": 46,
+        "competitions": [
+          "EFL Championship",
+          "English Premier League"
+        ],
+        "screenshots": [
+          "03-aston-villa-full-history.png",
+          "04-aston-villa-championship.png"
+        ]
+      }
+    },
+    {
+      "case": "NBA real player search and recent season switching",
+      "expected": "LeBron James has actual selected 2023-24, 2024-25 and 2025-26 rows, with a season history table.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "stable_id": "nba:2544",
+        "seasons": [
+          {
+            "season": "2023-24",
+            "records": 1
+          },
+          {
+            "season": "2024-25",
+            "records": 1
+          },
+          {
+            "season": "2025-26",
+            "records": 1
+          }
+        ],
+        "screenshot": "05-nba-real-player-season.png"
+      }
+    },
+    {
+      "case": "Historical F1 driver profile",
+      "expected": "Source-backed early championship driver history opens with an actual chart.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "stable_id": "f1db:juan-manuel-fangio",
+        "observed_records": 58,
+        "seasons": [
+          "1950",
+          "1951",
+          "1953",
+          "1954",
+          "1955",
+          "1956",
+          "1957",
+          "1958"
+        ],
+        "screenshot": "06-historical-f1-driver.png"
+      }
+    },
+    {
+      "case": "Soccer simultaneous dashboard and compact view",
+      "expected": "Six distinct panels have recorded chart data, exported as real full-window and full-page screenshots.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "selection_records": 7148,
+        "source": "openfootball",
+        "entity_type": "team",
+        "season": "2025-26",
+        "six_components": [
+          {
+            "title": "SCORING IN RECORDED MATCHES",
+            "plotted_rows": 38,
+            "explanation": "Values are from the selected source records; missing observations are excluded."
+          },
+          {
+            "title": "TOP SCORING CLUBS",
+            "plotted_rows": 12,
+            "explanation": "Ranked per-game counts or measured rates, using actual source denominators. Lower-is-better metrics rank the lowest observed average first."
+          },
+          {
+            "title": "GOALS CONCEDED DISTRIBUTION",
+            "plotted_rows": 38,
+            "explanation": "Distribution of actual metric values for up to six athletes, with automatic histogram bins. No missing records are filled."
+          },
+          {
+            "title": "ATTACK VS DEFENCE · CLUBS",
+            "plotted_rows": 38,
+            "explanation": "Each point is one source record with both metrics observed; correlation does not establish causation."
+          },
+          {
+            "title": "LEAGUE TEAM PERFORMANCE",
+            "plotted_rows": 4,
+            "explanation": "GameSense percentiles within the displayed cohort, using per-game counts and attempt-weighted rates. Ties share average ranks; lower-is-better metrics are reversed. With two competitors this is a relative two-person comparison, not a league ranking."
+          },
+          {
+            "title": "GOAL DIFFERENCE BY MATCH",
+            "plotted_rows": 38,
+            "explanation": "Median, quartiles and 1.5×IQR whiskers of observed source values. Dots mark outliers; sparse samples can be misleading."
+          }
+        ],
+        "screenshots": [
+          "07-soccer-dashboard.png",
+          "08-soccer-six-chart-studio.png",
+          "09-soccer-compact.png"
+        ]
+      }
+    },
+    {
+      "case": "NBA simultaneous dashboard and compact view",
+      "expected": "Six distinct panels have recorded chart data, exported as real full-window and full-page screenshots.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "selection_records": 569,
+        "source": "boxscorelab",
+        "entity_type": "athlete",
+        "season": "2024-25",
+        "six_components": [
+          {
+            "title": "DOWNLOADED CAREER · POINTS PER GAME",
+            "plotted_rows": 5,
+            "explanation": "Per-game counts in each season, using actual games played; rates use source denominators where available. Gaps mean unavailable observations, not zero."
+          },
+          {
+            "title": "PER-GAME SCORING LEADERS",
+            "plotted_rows": 12,
+            "explanation": "Ranked per-game counts or measured rates, using actual source denominators. Lower-is-better metrics rank the lowest observed average first."
+          },
+          {
+            "title": "COHORT SCORING DISTRIBUTION",
+            "plotted_rows": 569,
+            "explanation": "Distribution across every selected observed player-season row, with automatic bins; missing values excluded."
+          },
+          {
+            "title": "MULTI-STAT PLAYER PROFILE",
+            "plotted_rows": 4,
+            "explanation": "GameSense percentiles within the displayed cohort, using per-game counts and attempt-weighted rates. Ties share average ranks; lower-is-better metrics are reversed. With two competitors this is a relative two-person comparison, not a league ranking."
+          },
+          {
+            "title": "COHORT SCORING VS PLAYMAKING",
+            "plotted_rows": 569,
+            "explanation": "Each point is one source record with both metrics observed; correlation does not establish causation."
+          },
+          {
+            "title": "PER-GAME SCORING BY RECORDED POSITION",
+            "plotted_rows": 528,
+            "explanation": "Observed player-season scoring rates grouped by recorded position (up to eight groups); rows without a position are excluded. This is a cohort distribution, not individual game consistency."
+          }
+        ],
+        "screenshots": [
+          "07-nba-dashboard.png",
+          "08-nba-six-chart-studio.png",
+          "09-nba-compact.png"
+        ]
+      }
+    },
+    {
+      "case": "F1 simultaneous dashboard and compact view",
+      "expected": "Six distinct panels have recorded chart data, exported as real full-window and full-page screenshots.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "selection_records": 479,
+        "source": "f1db",
+        "entity_type": "athlete",
+        "season": "2024",
+        "six_components": [
+          {
+            "title": "RACE POINTS · RECORDED STARTS",
+            "plotted_rows": 14,
+            "explanation": "Values are from the selected source records; missing observations are excluded."
+          },
+          {
+            "title": "POINTS LEADERS",
+            "plotted_rows": 12,
+            "explanation": "Ranked per-game counts or measured rates, using actual source denominators. Lower-is-better metrics rank the lowest observed average first."
+          },
+          {
+            "title": "QUALIFYING VS RACE",
+            "plotted_rows": 22,
+            "explanation": "Actual grid and finish positions. Points above the diagonal gained places. Pit-lane starts without a numeric grid are excluded."
+          },
+          {
+            "title": "FINISHING POSITION SPREAD",
+            "plotted_rows": 23,
+            "explanation": "Distribution of actual metric values for up to six athletes, with automatic histogram bins. No missing records are filled."
+          },
+          {
+            "title": "DRIVER STRENGTHS",
+            "plotted_rows": 4,
+            "explanation": "GameSense percentiles within the displayed cohort, using per-game counts and attempt-weighted rates. Ties share average ranks; lower-is-better metrics are reversed. With two competitors this is a relative two-person comparison, not a league ranking."
+          },
+          {
+            "title": "CHAMPIONSHIP EVOLUTION",
+            "plotted_rows": 24,
+            "explanation": "Provider-recorded championship standings after each round; historical dropped-score rules are preserved. Up to eight athlete-season series."
+          }
+        ],
+        "screenshots": [
+          "07-f1-dashboard.png",
+          "08-f1-six-chart-studio.png",
+          "09-f1-compact.png"
+        ]
+      }
+    },
+    {
+      "case": "AFL recorded club dashboard and compact view",
+      "expected": "Real club scores, goals, behinds and margins produce six actual charts; player-only fields are not invented.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "selection_records": 436,
+        "source": "squiggle",
+        "entity_type": "team",
+        "season": "2026",
+        "six_components": [
+          {
+            "title": "SCORING IN RECORDED MATCHES",
+            "plotted_rows": 25,
+            "explanation": "Values are from the selected source records; missing observations are excluded."
+          },
+          {
+            "title": "HIGHEST-SCORING AFL CLUBS",
+            "plotted_rows": 12,
+            "explanation": "Ranked per-game counts or measured rates, using actual source denominators. Lower-is-better metrics rank the lowest observed average first."
+          },
+          {
+            "title": "GOALS PER MATCH · ACTUAL RESULTS",
+            "plotted_rows": 25,
+            "explanation": "Distribution of actual metric values for up to six athletes, with automatic histogram bins. No missing records are filled."
+          },
+          {
+            "title": "DEFENSIVE POINTS CONCEDED",
+            "plotted_rows": 25,
+            "explanation": "Median, quartiles and 1.5×IQR whiskers of observed source values. Dots mark outliers; sparse samples can be misleading."
+          },
+          {
+            "title": "OFFENCE VS DEFENCE · CLUBS",
+            "plotted_rows": 25,
+            "explanation": "Each point is one source record with both metrics observed; correlation does not establish causation."
+          },
+          {
+            "title": "CLUB PERFORMANCE PROFILE",
+            "plotted_rows": 4,
+            "explanation": "GameSense percentiles within the displayed cohort, using per-game counts and attempt-weighted rates. Ties share average ranks; lower-is-better metrics are reversed. With two competitors this is a relative two-person comparison, not a league ranking."
+          }
+        ],
+        "screenshots": [
+          "07-afl-dashboard.png",
+          "08-afl-six-chart-studio.png",
+          "09-afl-compact.png"
+        ],
+        "qa_only_rows_copied": 10658,
+        "scope": "Existing locally downloaded results copied into isolated QA; not bundled in a fresh installer."
+      }
+    },
+    {
+      "case": "Recorded head-to-head comparison",
+      "expected": "Two NBA players under one source and season show calculated differences plus simultaneous trend, radar, form and rating charts.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "competitors": [
+          "nba:2544",
+          "nba:201939"
+        ],
+        "summary_rows": 25,
+        "screenshots": [
+          "10-nba-head-to-head.png",
+          "11-nba-head-to-head-full.png"
+        ]
+      }
+    },
+    {
+      "case": "F1 recorded constructor comparison",
+      "expected": "Two actual constructor IDs aggregate their recorded driver starts, matching stored point totals with explicit limitations.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "constructors": {
+          "f1db:aston-martin": {
+            "driver_starts": 48,
+            "observed_driver_points": 94.0
+          },
+          "f1db:ferrari": {
+            "driver_starts": 48,
+            "observed_driver_points": 595.0
+          }
+        },
+        "screenshots": [
+          "14-f1-constructor-comparison.png",
+          "15-f1-constructor-comparison-full.png"
+        ],
+        "scope": "Sum of actual driver points, not an asserted official constructor championship table."
+      }
+    },
+    {
+      "case": "Explainable experimental rating and deterministic insights",
+      "expected": "A real club profile exposes its formula, recorded trend, score limitations and source/period-qualified factual insights.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "rating": {
+          "score": 46.89449541284404,
+          "recent_score": 32.25,
+          "recent_label": "last five recorded games",
+          "recent_observations": 5,
+          "recent_window_observations": 5,
+          "recent_unavailable_observations": 0,
+          "eligible_records": 545,
+          "total_records": 545,
+          "components": [
+            {
+              "metric": "match result",
+              "weight": 0.7,
+              "score_contribution": 32.62385321100918
+            },
+            {
+              "metric": "scoring margin",
+              "weight": 0.3,
+              "score_contribution": 14.270642201834862
+            }
+          ],
+          "explanation": "Experimental GameSense metric (0–100), not an official league statistic. clip(x)=min(1,max(0,x)). Score = 100 × [0.70 × result + 0.30 × clip(0.5 + margin/8)]. Result is 1 for a win, 0.5 for a draw, 0 for a loss. Margin is recorded score for minus score against. Each input must be an actual match result: a season's total scores cannot establish its wins or losses and receive no club rating. A ±4 goal margin saturates the margin component. The 70% result weight prioritises winning; 30% rewards the recorded scoring margin. All required components must be recorded; missing is not zero. Season totals are divided by observed games, source per-game rows are used directly. Selected-period scores weight eligible aggregate rows by observed games. Recent form takes the last five recorded games or season rows first, then averages their eligible scores; missing inputs remain unknown and coverage is shown. Heuristic only: player score favours attacking volume, not goalkeeper or defensive quality; club margin ignores opponent strength and historical scoring conditions.",
+          "limitation": "Heuristic only: player score favours attacking volume, not goalkeeper or defensive quality; club margin ignores opponent strength and historical scoring conditions.",
+          "experimental": true
+        },
+        "insights": [
+          {
+            "text": "This selection won 1 of the last 5 dated recorded matches (1 draws, 3 losses).",
+            "period": "2010-08-14 to 2026-09-19",
+            "source": "openfootball",
+            "records": 5
+          },
+          {
+            "text": "This selection averaged 1.29 goals scored and 1.50 conceded per recorded match.",
+            "period": "2010-08-14 to 2026-09-19",
+            "source": "openfootball",
+            "records": 545
+          },
+          {
+            "text": "Experimental GameSense score: 46.9/100 from 545 of 545 eligible records. This is a heuristic, not an official ranking.",
+            "period": "2010-08-14 to 2026-09-19",
+            "source": "openfootball",
+            "records": 545
+          }
+        ],
+        "screenshots": [
+          "12-experimental-rating-and-insights.png",
+          "12-experimental-rating-and-insights-full.png"
+        ]
+      }
+    },
+    {
+      "case": "Real licensed portraits offline",
+      "expected": "Three real bundled player/driver portraits decode with matching stable identities and attribution.",
+      "dataset": "ACTUAL SOURCE-BACKED RECORDS",
+      "required": true,
+      "status": "pass",
+      "actual": [
+        {
+          "identity": "nba:2544",
+          "license": "CC BY 2.0",
+          "artist": "Erik Drost",
+          "source_url": "https://commons.wikimedia.org/wiki/File:LeBron_James_(51959977144)_(cropped2).jpg"
+        },
+        {
+          "identity": "f1db:lewis-hamilton",
+          "license": "CC BY 2.0",
+          "artist": "Governo do Estado de São Paulo",
+          "source_url": "https://commons.wikimedia.org/wiki/File:Lewis_Hamilton_2022_S%C3%A3o_Paulo_Grand_Prix_(52498120773)_(cropped).jpg"
+        },
+        {
+          "identity": "statsbomb:5503",
+          "license": "CC BY-SA 4.0",
+          "artist": "Bryan Berlin / WikiPortraits",
+          "source_url": "https://commons.wikimedia.org/wiki/File:Leo_Messi_Argentina_v_Egypt_7_July_2026-1.jpg"
+        }
+      ]
+    },
+    {
+      "case": "Incompatible comparison guard",
+      "expected": "Athlete and club units are rejected and previous comparison charts are cleared.",
+      "dataset": "CONTROLLED FICTIONAL QA FIXTURE",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "state": "Choose two players, two drivers or two clubs. Athlete and club statistics use different units."
+      }
+    },
+    {
+      "case": "Native import, quality report, persistence and export",
+      "expected": "The actual UI background worker imports valid rows, reports duplicate/bad-date/negative-score rows, preserves missing metrics, and detects unchanged repeat imports.",
+      "dataset": "CONTROLLED FICTIONAL QA FIXTURE",
+      "required": true,
+      "status": "pass",
+      "actual": {
+        "first_counts": {
+          "input_rows": 4,
+          "valid_rows": 1,
+          "duplicates_removed": 1,
+          "invalid_rows_removed": 2,
+          "inserted_rows": 1
+        },
+        "repeat_unchanged_rows": 1,
+        "report": "controlled-import-quality-report.json",
+        "screenshot": "13-data-quality-controlled-fixture.png"
+      }
+    }
+  ],
+  "unhandled_errors": [],
+  "success": true,
+  "limitations": [
+    "Screenshots are actual Qt widget renders; they do not prove manual interactive installation or macOS execution.",
+    "AFL source-backed screenshots, when present, use a separate previously downloaded local archive. AFL is on demand in a fresh install.",
+    "The bundled NBA starter covers recent seasons only. Older NBA seasons require a successful permitted provider download and are not claimed by this report.",
+    "CSV/JSON/XLSX format and calculation unit tests are reported separately by pytest.",
+    "Visual screenshots require human inspection; nonempty chart data alone is not a visual-quality verdict."
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "source": "openfootball/football.json",
+  "license": "CC0-1.0",
+  "source_url": "https://github.com/openfootball/football.json",
+  "grain": "club team match; no player stats, assists or rosters",
+  "seasons": [
+    "2010-11",
+    "2011-12",
+    "2012-13",
+    "2013-14",
+    "2014-15",
+    "2015-16",
+    "2016-17",
+    "2017-18",
+    "2018-19",
+    "2019-20",
+    "2020-21",
+    "2021-22",
+    "2022-23",
+    "2023-24",
+    "2024-25",
+    "2025-26",
+    "2026-27"
+  ],
+  "leagues": {
+    "en.1": 17,
+    "en.2": 15,
+    "de.1": 17,
+    "es.1": 15,
+    "es.2": 11,
+    "de.2": 14,
+    "it.1": 14,
+    "it.2": 10,
+    "fr.1": 13,
+    "fr.2": 9,
+    "pt.1": 9,
+    "nl.1": 9
+  },
+  "team_records": 108962,
+  "partial_seasons": true,
+  "last_download_utc": "2026-10-29T09:45:47.777431+00:00"
+}

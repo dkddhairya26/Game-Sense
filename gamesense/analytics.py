@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 
 SPORTS = {
-    'Soccer': {'metrics': ['goals', 'assists', 'shots', 'passes', 'tackles'], 'weights': {'goals': 5, 'assists': 3, 'shots': .4, 'passes': .025, 'tackles': .4}},
-    'NBA': {'metrics': ['points', 'rebounds', 'assists', 'steals', 'blocks'], 'weights': {'points': 1, 'rebounds': 1.2, 'assists': 1.5, 'steals': 2, 'blocks': 2}},
-    'AFL': {'metrics': ['disposals', 'marks', 'tackles', 'goals', 'clearances'], 'weights': {'disposals': .65, 'marks': 1.1, 'tackles': 1.5, 'goals': 5, 'clearances': 1.4}},
-    'F1': {'metrics': ['points', 'finish_position', 'grid_position', 'laps', 'fastest_lap'], 'weights': {'points': 1, 'finish_position': -1.1, 'grid_position': -.3, 'fastest_lap': 3}},
+    'Soccer': {'metrics': ['goals', 'assists', 'shots', 'passes', 'tackles']},
+    'NBA': {'metrics': ['points', 'rebounds', 'assists', 'steals', 'blocks']},
+    'AFL': {'metrics': ['disposals', 'marks', 'tackles', 'goals', 'clearances']},
+    'F1': {'metrics': ['points', 'finish_position', 'grid_position', 'laps', 'fastest_lap']},
 }
 REQUIRED = ['date', 'season', 'competitor', 'team']
 
@@ -43,9 +43,13 @@ def clean_data(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
         if metric not in df.columns:
             df[metric] = float('nan')  # Missing is NOT zero.
         df[metric] = pd.to_numeric(df[metric], errors='coerce').replace([np.inf, -np.inf], np.nan)
-    # Partial scores are incomparable: require every component in the formula.
-    weights = SPORTS[sport]['weights']
-    df['rating'] = sum(df[k] * w for k, w in weights.items())
+    # Keep the original public `rating` column, but calculate the same bounded,
+    # documented experimental score as the profile and comparison views.
+    # Previously this column multiplied season totals by arbitrary weights,
+    # making a full season incomparable with one game. The rating module
+    # resolves the record grain and real games denominator before scoring.
+    from .ratings import rating_frame
+    df['rating'] = rating_frame(df,sport)['experimental_rating'].to_numpy()
     df = df.sort_values('date').reset_index(drop=True)
     return df, {'input_rows': original, 'duplicates_removed': duplicates, 'invalid_rows_removed': removed, 'valid_rows': len(df)}
 
@@ -56,12 +60,13 @@ def rankings(df: pd.DataFrame, sport: str) -> pd.DataFrame:
     rows = []
     for identity, group in df.groupby(key, dropna=True):
         latest = group.sort_values('date').iloc[-1]
-        kinds = group.get('record_type', group.get('record_kind', pd.Series('event', index=group.index))).fillna('').astype(str)
+        kinds = group.get('record_type', pd.Series('', index=group.index)).fillna('').astype(str)
+        kinds = kinds + ' ' + group.get('record_kind', pd.Series('',index=group.index)).fillna('').astype(str)
         season = kinds.str.contains('season|career', case=False, regex=True)
-        games = pd.to_numeric(group.get('games', group.get('games_played', pd.Series(np.nan,index=group.index))), errors='coerce').where(season, 1)
+        games = game_counts(group).where(season,1)
         count = int(games.sum()) if games.notna().all() else None
         rating = float(group['rating'].mean()) if group['rating'].notna().any() else np.nan
-        if kinds.str.contains(r'per.?game|average', case=False, regex=True).all():
+        if season.any():
             rating = weighted_average(group['rating'], games)
         row = {'competitor':latest['competitor'], 'team':latest['team'], 'appearances':count, 'average_rating':rating}
         if key == 'competitor_id':
@@ -80,17 +85,34 @@ def summary(df: pd.DataFrame, sport: str) -> dict:
     return {'records': len(df), 'competitors': int(df['competitor'].nunique()), 'teams': int(df['team'].nunique()), 'seasons': int(df['season'].nunique()), 'average_rating': round(float(df['rating'].mean()), 2) if df['rating'].notna().any() else None}
 
 
-NON_TOTAL = {'finish_position', 'grid_position', 'position', 'round', 'rating', 'age', 'rank', 'number', 'fastest_lap', 'lap_time', 'speed', 'x', 'y', 'shot_x', 'shot_y', 'latitude', 'longitude'}
+NON_TOTAL = {'finish_position', 'grid_position', 'position', 'round', 'rating',
+             'experimental_rating', 'recent_rating', 'rating_weight',
+             'age', 'rank', 'number', 'fastest_lap', 'lap_time', 'speed',
+             'x', 'y', 'shot_x', 'shot_y', 'latitude', 'longitude'}
 
 
 def is_rate(metric: str) -> bool:
-    return (metric in NON_TOTAL or metric.endswith(('_pg', '_per_90', '_per_36', '_ms', '_position', '_number'))
+    return (metric in NON_TOTAL or metric.endswith(('_pg', '_per_90', '_per_36', '_ms', '_position', '_number', '_game_high', '_rating', '_rate'))
+            or metric.startswith('minutes_weighted_game_')
+            or metric.removeprefix('advanced_') in {'pace', 'pie', 'player_impact_estimate', 'box_plus_minus', 'win_shares_per_48'}
             or metric in {'championship_points', 'usage_rate', 'net_rating', 'positions_gained', 'fastest_lap_number', 'classified_position'}
             or any(token in metric for token in ('percentage', '_pct', 'accuracy', 'efficiency', 'per_game', 'average', 'percentile')))
 
 
 def lower_is_better(metric: str) -> bool:
-    return metric.endswith(('_position', '_time_ms')) or metric in {'position', 'q1_ms', 'q2_ms', 'q3_ms', 'lap_time', 'turnovers', 'fouls', 'yellow_cards', 'red_cards', 'race_time_ms'}
+    return metric.endswith(('_position', '_time_ms')) or metric in {'position', 'q1_ms', 'q2_ms', 'q3_ms', 'lap_time', 'turnovers', 'fouls', 'yellow_cards', 'red_cards', 'race_time_ms', 'goals_against', 'points_against', 'goals_conceded', 'points_conceded', 'average_finish', 'average_qualifying'}
+
+
+def game_counts(df: pd.DataFrame) -> pd.Series:
+    """Resolve the two supported games fields row by row, retaining unknowns.
+
+    A merged import can contain a `games` column from one source and a
+    `games_played` column from another. Choosing one entire column would lose
+    genuine denominators on the other rows. Neither missing value becomes zero.
+    """
+    primary = pd.to_numeric(df.get('games', pd.Series(np.nan,index=df.index)),errors='coerce')
+    alternate = pd.to_numeric(df.get('games_played', pd.Series(np.nan,index=df.index)),errors='coerce')
+    return primary.where(primary.notna(),alternate).replace([np.inf,-np.inf],np.nan)
 
 
 def weighted_average(values, weights) -> float | None:
@@ -101,7 +123,17 @@ def weighted_average(values, weights) -> float | None:
 
 def metric_summary(df: pd.DataFrame, metric: str) -> dict:
     """Do not count one season-total row as one game, or add percentages."""
-    values = pd.to_numeric(df.get(metric, pd.Series(dtype=float)), errors='coerce').replace([np.inf, -np.inf], np.nan)
+    shooting = {'field_goal_pct':('field_goals_made','field_goal_attempts'),
+                'three_point_pct':('three_point_makes','three_point_attempts'),
+                'free_throw_pct':('free_throws_made','free_throw_attempts'),
+                'pass_accuracy':('passes_completed','passes')}
+    values = pd.to_numeric(df.get(metric, pd.Series(np.nan,index=df.index)), errors='coerce').replace([np.inf, -np.inf], np.nan)
+    if metric in shooting:
+        made_key, attempts_key = shooting[metric]
+        if made_key in df and attempts_key in df:
+            made = pd.to_numeric(df[made_key],errors='coerce')
+            attempts = pd.to_numeric(df[attempts_key],errors='coerce')
+            values = values.where(values.notna(),made.div(attempts.where(attempts.gt(0))))
     valid = values.dropna()
     if valid.empty:
         return {'total': None, 'average': None, 'best': None, 'count': 0, 'per_game': None}
@@ -114,7 +146,7 @@ def metric_summary(df: pd.DataFrame, metric: str) -> dict:
             kinds = kinds + ' ' + df['record_kind'].fillna('').astype(str)
         season_rows = kinds.str.contains('season|career', case=False, regex=True)
         average_rows = season_rows & kinds.str.contains(r'per.?game|average', case=False, regex=True)
-        games = pd.to_numeric(df.get('games', df.get('games_played', pd.Series(np.nan, index=df.index))), errors='coerce')
+        games = game_counts(df)
         if average_rows.any():
             # Earlier GameSense archives contained PPG, whereas the new provider
             # supplies season totals. Explicit record grain preserves both.
@@ -130,16 +162,12 @@ def metric_summary(df: pd.DataFrame, metric: str) -> dict:
         if total is not None and denominators[values.notna()].notna().all() and (denominators[values.notna()] > 0).all() and denominators.sum() > 0:
             per_game = float(total / denominators.sum())
     if metric.endswith('_pg') or 'per_game' in metric:
-        weights = pd.to_numeric(df.get('games', df.get('games_played', pd.Series(np.nan, index=df.index))), errors='coerce')
+        weights = game_counts(df)
         weighted = weighted_average(values, weights)
         if weighted is not None:
             average = weighted
     # Career percentages use the source's actual attempt counts. An unweighted
     # mean of 1/1 and 0/9 would incorrectly report 50% instead of 10%.
-    shooting = {'field_goal_pct':('field_goals_made','field_goal_attempts'),
-                'three_point_pct':('three_point_makes','three_point_attempts'),
-                'free_throw_pct':('free_throws_made','free_throw_attempts'),
-                'pass_accuracy':('passes_completed','passes')}
     if metric in shooting:
         made_key, attempts_key = shooting[metric]
         if made_key in df and attempts_key in df:
@@ -147,7 +175,14 @@ def metric_summary(df: pd.DataFrame, metric: str) -> dict:
             attempts = pd.to_numeric(df[attempts_key], errors='coerce')
             eligible = values.notna()
             if made[eligible].notna().all() and attempts[eligible].notna().all() and attempts[eligible].sum() > 0:
-                average = float(made[eligible].sum()/attempts[eligible].sum())
+                # Some official imports supply season *per-game* makes and
+                # attempts. Multiply each by its actual games before forming
+                # the career ratio; otherwise a short season gets equal weight.
+                eligible_frame = df.loc[eligible]
+                made_total = metric_summary(eligible_frame,made_key)['total']
+                attempt_total = metric_summary(eligible_frame,attempts_key)['total']
+                if made_total is not None and attempt_total is not None and attempt_total > 0:
+                    average = float(made_total/attempt_total)
     return {'total': total, 'average': average, 'best': float(valid.min() if lower_is_better(metric) else valid.max()), 'count': len(valid), 'per_game': per_game}
 
 

@@ -7,8 +7,13 @@ rejected before any data is changed.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timezone
+import json
+from numbers import Number
+from pathlib import Path
 import re
 
+import numpy as np
 import pandas as pd
 
 
@@ -103,3 +108,245 @@ def prepare_import(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame,list[str]
     if 'date_precision' not in out:
         out['date_precision']='day'
     return out,notes
+
+
+# Only fields with a documented numeric meaning are converted. Arbitrary source
+# columns remain intact: converting every object column would destroy team names,
+# event identifiers and nested shot arrays needed for later analysis.
+COUNT_FIELDS = {
+    'goals', 'goals_against', 'assists', 'shots', 'shots_on_target', 'passes',
+    'passes_completed', 'tackles', 'interceptions', 'clearances', 'starts',
+    'yellow_cards', 'red_cards', 'appearances', 'games', 'games_played',
+    'points_against', 'rebounds', 'offensive_rebounds', 'defensive_rebounds',
+    'steals', 'blocks', 'turnovers', 'field_goals_made', 'field_goal_attempts',
+    'three_point_makes', 'three_point_attempts', 'free_throws_made',
+    'free_throw_attempts', 'disposals', 'kicks', 'handballs', 'marks', 'behinds',
+    'laps', 'pit_stops', 'minutes', 'wins', 'draws', 'losses', 'podiums',
+}
+FRACTION_FIELDS = {'field_goal_pct', 'three_point_pct', 'free_throw_pct',
+                   'pass_accuracy', 'shooting_accuracy'}
+NUMERIC_FIELDS = COUNT_FIELDS | FRACTION_FIELDS | {
+    'points', 'finish_position', 'grid_position', 'qualifying_position',
+    'championship_points', 'fastest_lap', 'q1_ms', 'q2_ms', 'q3_ms',
+    'xg', 'xa', 'margin', 'goal_difference', 'scoring_percentage', 'table_points',
+    'effective_field_goal_pct', 'true_shooting_pct',
+}
+
+
+def read_import_file(path) -> pd.DataFrame:
+    """Read a supported local dataset without changing the source file.
+
+    JSON accepts a records list, a column-oriented pandas object, or a records
+    list wrapped in ``records``/``data``. Explicit wrappers are common in exports;
+    unsupported nested API responses fail clearly instead of becoming fake rows.
+    XLSX uses openpyxl through pandas; no executable spreadsheet macros are run.
+    """
+    source = Path(path)
+    suffix = source.suffix.lower()
+    if suffix == '.csv':
+        return pd.read_csv(source, encoding='utf-8-sig')
+    if suffix == '.xlsx':
+        return pd.read_excel(source, engine='openpyxl')
+    if suffix == '.json':
+        with source.open('r', encoding='utf-8-sig') as stream:
+            payload = json.load(stream)
+        if isinstance(payload, dict):
+            wrappers = [key for key in ('records', 'data') if key in payload]
+            if wrappers:
+                payload = payload[wrappers[0]]
+        if not isinstance(payload, (list, dict)):
+            raise ValueError('JSON must contain a records list or a column-oriented object.')
+        if isinstance(payload, list) and any(not isinstance(row, dict) for row in payload):
+            raise ValueError('Each JSON record must be an object with named columns.')
+        try:
+            return pd.DataFrame(payload)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('JSON does not contain a rectangular sporting dataset.') from exc
+    raise ValueError('Supported import formats are CSV, JSON and XLSX.')
+
+
+def _comparison_keys(frame: pd.DataFrame) -> pd.DataFrame:
+    """Make nested values hashable without removing the original observations."""
+    keys = frame.copy()
+    for column in keys.select_dtypes(include=['object']).columns:
+        keys[column] = keys[column].map(
+            lambda value: json.dumps(value, sort_keys=True, default=str)
+            if isinstance(value, (list, dict)) else value)
+    return keys
+
+
+def validate_import(raw: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
+    """Normalize, validate and clean an import, returning auditable row counts.
+
+    Validation is deliberately row-local: a bad date or impossible count rejects
+    that row, while valid records still reach SQLite. Blank optional measurements
+    remain missing. Malformed optional numbers become missing and are counted;
+    negative count values, fractional probabilities outside [0,1], and made/attempt
+    contradictions are rejected. F1 points may include a source penalty, so the
+    universal nonnegative-score rule is restricted to Soccer, NBA and AFL.
+
+    Rejection reason counts can overlap. The accounting identity is always
+    input_rows = duplicates_removed + invalid_rows_removed + valid_rows.
+    """
+    from .analytics import clean_data
+
+    if not isinstance(raw, pd.DataFrame):
+        raise TypeError('Import data must be a pandas DataFrame.')
+    prepared, notes = prepare_import(raw, sport)
+    prepared = prepared.reset_index(drop=True)
+    # Retain source row numbers in the report only, so provenance does not stop
+    # otherwise identical rows being detected as duplicates.
+    for key in ('competitor', 'season', 'team'):
+        prepared[key] = prepared[key].astype('string').str.strip().replace('', pd.NA)
+    numeric_conversions, malformed_numbers = {}, {}
+    changed_rows = pd.Series(False, index=prepared.index)
+    for key in prepared.columns:
+        if key not in NUMERIC_FIELDS and not key.endswith(('_pg', '_per_game', '_per_90', '_per_36')):
+            continue
+        values = prepared[key]
+        converted = pd.to_numeric(values, errors='coerce').replace([np.inf, -np.inf], np.nan)
+        nonblank = values.notna() & values.astype('string').str.strip().ne('').fillna(False)
+        malformed = nonblank & converted.isna()
+        strings = values.map(lambda value: isinstance(value, str)) & converted.notna()
+        numeric_conversions[key] = int(strings.sum())
+        malformed_numbers[key] = int(malformed.sum())
+        changed_rows |= strings | malformed
+        prepared[key] = converted
+
+    duplicate = _comparison_keys(prepared).duplicated(keep='first')
+    candidates = prepared.loc[~duplicate].copy()
+    dates = pd.to_datetime(candidates['date'], errors='coerce', utc=True, format='mixed')
+    # pandas interprets bare numeric dates as nanoseconds since 1970. An Excel
+    # serial or YYYYMMDD integer must not silently become a valid 1970 fixture.
+    numeric_date = candidates['date'].map(lambda value: isinstance(value, Number))
+    bad_date = dates.isna() | numeric_date
+    bad_identity = (candidates['competitor'].isna() | candidates['season'].isna())
+    reasons = {index: [] for index in candidates.index}
+    for index in candidates.index[bad_date]:
+        reasons[index].append('Invalid or missing date / season sorting marker')
+    for index in candidates.index[bad_identity]:
+        reasons[index].append('Missing competitor or season')
+
+    # Two different observations with the same fallback event identity would
+    # overwrite each other in SQLite. Keep the first and explicitly reject later
+    # conflicts. Supply event_id for genuine same-day doubleheaders, or record_id
+    # for a provider's own unambiguous row key. This is distinct from exact-row
+    # duplicates, which were removed above.
+    def identity_text(value):
+        return '' if value is None or pd.isna(value) else str(value)
+
+    invalid_score = pd.Series(False, index=candidates.index)
+    score_fields = COUNT_FIELDS | ({'points'} if sport != 'F1' else set())
+    for key in score_fields & set(candidates.columns):
+        negative = candidates[key].notna() & candidates[key].lt(0)
+        invalid_score |= negative
+        for index in candidates.index[negative]:
+            reasons[index].append(f'{key} cannot be negative')
+    for key in FRACTION_FIELDS & set(candidates.columns):
+        outside = candidates[key].notna() & ~candidates[key].between(0, 1)
+        invalid_score |= outside
+        for index in candidates.index[outside]:
+            reasons[index].append(f'{key} must be a fraction from 0 to 1; convert percent values before import')
+    pairs = [('field_goals_made', 'field_goal_attempts'),
+             ('three_point_makes', 'three_point_attempts'),
+             ('free_throws_made', 'free_throw_attempts'),
+             ('passes_completed', 'passes'), ('shots_on_target', 'shots')]
+    for made_key, attempts_key in pairs:
+        if made_key not in candidates or attempts_key not in candidates:
+            continue
+        impossible = candidates[made_key].notna() & candidates[attempts_key].notna() & candidates[made_key].gt(candidates[attempts_key])
+        invalid_score |= impossible
+        for index in candidates.index[impossible]:
+            reasons[index].append(f'{made_key} exceeds {attempts_key}')
+    # Grid=0 is an actual pit-lane start; finishing position=0 is not a valid
+    # classified place. Unknown/DNF positions should be blank, never zero-filled.
+    for key in ('finish_position', 'qualifying_position'):
+        if key in candidates:
+            invalid = candidates[key].notna() & candidates[key].lt(1)
+            invalid_score |= invalid
+            for index in candidates.index[invalid]:
+                reasons[index].append(f'{key} must be positive or missing')
+
+    # Effective FG and true shooting measure scoring value, not a Bernoulli
+    # success fraction: a made three on one FGA gives eFG=1.5, legitimately >1.
+    for key in ('effective_field_goal_pct', 'true_shooting_pct'):
+        if key in candidates:
+            invalid = candidates[key].notna() & ~candidates[key].between(0, 1.5)
+            invalid_score |= invalid
+            for index in candidates.index[invalid]:
+                reasons[index].append(f'{key} must be between 0 and 1.5')
+    if 'grid_position' in candidates:
+        invalid = candidates['grid_position'].notna() & candidates['grid_position'].lt(0)
+        invalid_score |= invalid
+        for index in candidates.index[invalid]:
+            reasons[index].append('grid_position cannot be negative; 0 is a pit-lane start')
+
+    seen_events, identity_conflict = set(), pd.Series(False, index=candidates.index)
+    for index, row in candidates.iterrows():
+        # An already rejected row must not reserve an identity and cause a later
+        # valid correction in the same file to be discarded.
+        if bad_date.loc[index] or bad_identity.loc[index] or invalid_score.loc[index]:
+            continue
+        explicit = identity_text(row.get('record_id'))
+        if explicit:
+            identity = ('record_id', explicit)
+        else:
+            athlete = identity_text(row.get('competitor_id')) or identity_text(row.get('competitor')).casefold()
+            date = dates.loc[index].isoformat()
+            identity = (athlete, identity_text(row.get('season')),
+                        identity_text(row.get('team')), identity_text(row.get('event_id')), date)
+        if identity in seen_events:
+            identity_conflict.loc[index] = True
+            reasons[index].append('Conflicting rows share one event identity; supply distinct event_id or record_id for separate games')
+        seen_events.add(identity)
+
+    rejected = bad_date | bad_identity | invalid_score | identity_conflict
+    accepted = candidates.loc[~rejected].copy()
+    clean, _ = clean_data(accepted, sport)
+    missing = {key: int(clean[key].isna().sum()) for key in clean.columns
+               if clean[key].isna().any()}
+    report = {
+        'schema_version': 1, 'sport': sport,
+        'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'input_rows': len(raw), 'duplicates_removed': int(duplicate.sum()),
+        'invalid_rows_removed': int(rejected.sum()), 'valid_rows': len(clean),
+        'invalid_dates': int(bad_date.sum()),
+        'missing_identity_rows': int(bad_identity.sum()),
+        'conflicting_event_rows': int(identity_conflict.sum()),
+        'invalid_scores': int(invalid_score.sum()),
+        'cleaned_rows': int(changed_rows.loc[accepted.index].sum()),
+        'missing_values': missing,
+        'numeric_conversions': {key: count for key, count in numeric_conversions.items() if count},
+        'malformed_numeric_values': {key: count for key, count in malformed_numbers.items() if count},
+        'notes': notes,
+        'rejected_examples': [{'source_row': int(index) + 2, 'reasons': reasons[index]}
+                              for index in candidates.index[rejected][:20]],
+        'limitations': [
+            'Optional missing measurements remain missing and are excluded from calculations.',
+            'Fraction fields such as field_goal_pct use 0–1; no ambiguous automatic rescaling.',
+            'Matching names do not establish a verified identity. Supply stable competitor_id and event_id where available.',
+            'A completed import is not evidence that a source covers a complete season.',
+        ],
+    }
+    assert report['input_rows'] == report['duplicates_removed'] + report['invalid_rows_removed'] + report['valid_rows']
+    return clean, report
+
+
+def import_dataset(archive, sport: str, raw: pd.DataFrame, source='User import') -> dict:
+    """Run the observable pipeline and persist its latest report for offline review."""
+    clean, report = validate_import(raw, sport)
+    counts = archive.import_frame_report(sport, clean, source)
+    report.update(counts)
+    report['source'] = str(source)
+    report['stages'] = ['Collect', 'Validate', 'Clean', 'Process', 'Calculate', 'Analyse', 'Visualise']
+    report['notes'].append('The accepted records are stored locally. Analysis and charts use the selected sport, competition and season filters.')
+    archive.set_setting('last_import_report', report)
+    return report
+
+
+def export_quality_report(report: dict, path) -> Path:
+    """Write a readable JSON evidence artifact without exporting local credentials."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + '\n', encoding='utf-8')
+    return destination

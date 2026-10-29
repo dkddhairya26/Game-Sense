@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 
@@ -49,6 +50,43 @@ def _json_value(value):
     if hasattr(value, 'isoformat'):
         return value.isoformat()
     return value
+
+
+def _seed_coverage(row):
+    """Classify a snapshot at its source capture date, not the current year.
+
+    An October 2026 NBA 2026–27 snapshot remains partial even when opened in
+    2028. Time passing cannot add the missing games to an immutable bundle.
+    Past closed seasons keep the legacy completed-import status; this still does
+    not guarantee every historical field, athlete or competition was recorded.
+    """
+    if row['provider'] == 'openfootball':
+        return ('partial', 'CC0 club match results for selected leagues only; no comprehensive league or player coverage.')
+    declared = str(row.get('season_status') or row.get('coverage_status') or '')
+    if declared in ('ongoing_partial', 'partial'):
+        return declared, 'Source explicitly identifies this season snapshot as incomplete.'
+    captured = row.get('source_updated') or row.get('fetched_at')
+    try:
+        as_of = datetime.fromisoformat(str(captured).replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return 'partial', 'Source snapshot date is unavailable; season completion cannot be verified.'
+    season = str(row['season'])
+    split = re.fullmatch(r'(\d{4})-(\d{2}|\d{4})', season)
+    if split:
+        start, end_text = int(split[1]), split[2]
+        end = int(end_text) if len(end_text) == 4 else start // 100 * 100 + int(end_text)
+        if end < start:
+            end += 100
+        # August is deliberately conservative for a basketball season ending
+        # in June; the algorithm does not infer closure from the latest row.
+        closed = end < as_of.year or (end == as_of.year and as_of.month >= 8)
+    elif re.fullmatch(r'\d{4}', season):
+        closed = int(season) < as_of.year
+    else:
+        return 'partial', 'Nonstandard season identifier; completion is not verified.'
+    if not closed:
+        return ('ongoing_partial', 'Bundled source snapshot was captured during this season; later results are not present or verified.')
+    return 'complete', ''
 
 
 class Archive:
@@ -147,13 +185,29 @@ class Archive:
             args.extend([max(0, int(limit)), max(0, int(offset))])
         with self.connect() as con:
             rows = [json.loads(r['payload']) for r in con.execute(sql, args)]
+            coverage = {(item['provider'], str(item['season'])): item['status']
+                        for item in con.execute(
+                            'SELECT provider,season,status FROM downloads WHERE sport=?',
+                            (sport,))}
         if not rows:
             return pd.DataFrame(columns=['date','season','competitor_id','competitor','team','sport','provider','entity_type'])
+        # Coverage belongs to a provider/season snapshot, not an individual
+        # athlete's performance. Expose it alongside measured values so charts
+        # and exports can label in-season points rather than hiding the flag in
+        # Data Manager. This annotates the result; stored source data is intact.
+        for row in rows:
+            status = coverage.get((row.get('provider'), str(row.get('season'))))
+            row['archive_status'] = status
+            if status == 'ongoing_partial':
+                original = row.get('season_status')
+                if original is not None and original != 'ongoing_partial':
+                    row.setdefault('source_season_status', original)
+                row['season_status'] = 'ongoing_partial'
         frame = pd.DataFrame(rows)
         frame['date'] = pd.to_datetime(frame['date'], errors='coerce', utc=True).dt.tz_localize(None)
         return frame
 
-    def search(self, sport, text='', limit=100, first_season=None, last_season=None, competition=None, season=None):
+    def search(self, sport, text='', limit=100, first_season=None, last_season=None, competition=None, season=None, provider=None, entity_type=None):
         # Escape LIKE syntax, so names containing %/_ remain literal searches.
         clauses, args = ['sport=?'], [sport]
         if competition and competition != 'All competitions':
@@ -162,6 +216,10 @@ class Archive:
         if season and season not in ('All downloaded seasons','All seasons'):
             clauses.append('season=?')
             args.append(str(season))
+        for column, value in (('provider', provider), ('entity_type', entity_type)):
+            if value:
+                clauses.append(column + '=?')
+                args.append(str(value))
         # Source names can include middle names (e.g. Lionel Andrés Messi).
         # Match every literal token without merging distinct stable identities.
         for token in str(text).split():
@@ -172,15 +230,27 @@ class Archive:
             clauses.append('season>=?'); args.append(str(first_season))
         if last_season is not None:
             clauses.append('season<=?'); args.append(str(last_season))
-        sql = '''SELECT competitor_id,
-                 (SELECT r2.competitor FROM records r2
-                  WHERE r2.competitor_id=records.competitor_id AND r2.sport=records.sport
-                  ORDER BY r2.date DESC,r2.record_id LIMIT 1) competitor,
-                 entity_type,MIN(season) first_season,
-                 MAX(season) last_season,COUNT(*) records,
-                 (SELECT r2.team FROM records r2 WHERE r2.competitor_id=records.competitor_id
-                  AND r2.sport=records.sport ORDER BY r2.date DESC,r2.record_id LIMIT 1) team
-                 FROM records WHERE ''' + ' AND '.join(clauses) + ' GROUP BY competitor_id ORDER BY competitor COLLATE NOCASE LIMIT ?'
+        # Rank only the matched selection before taking display metadata. A
+        # latest-career subquery against the whole archive previously labelled
+        # LeBron's selected 2024–25 LAL row with the source's 2026–27 team PHI.
+        # One window pass also avoids rescanning a large archive per identity.
+        sql = '''WITH selected AS (
+                    SELECT competitor_id,competitor,team,entity_type,season,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY competitor_id ORDER BY date DESC,record_id
+                           ) AS latest
+                    FROM records WHERE ''' + ' AND '.join(clauses) + '''),
+                 populations AS (
+                    SELECT competitor_id,MIN(season) first_season,
+                           MAX(season) last_season,COUNT(*) records
+                    FROM selected GROUP BY competitor_id)
+                 SELECT populations.competitor_id,selected.competitor,
+                        selected.entity_type,populations.first_season,
+                        populations.last_season,populations.records,selected.team
+                 FROM populations JOIN selected
+                   ON populations.competitor_id=selected.competitor_id
+                  AND selected.latest=1
+                 ORDER BY selected.competitor COLLATE NOCASE LIMIT ?'''
         args.append(max(1, min(int(limit), 10000)))
         with self.connect() as con:
             return pd.read_sql_query(sql, con, params=args)
@@ -195,6 +265,20 @@ class Archive:
             return [row[0] for row in con.execute(
                 "SELECT DISTINCT competition FROM records WHERE sport=? "
                 "AND competition<>'' ORDER BY competition COLLATE NOCASE", (sport,))]
+
+    def sources(self, sport):
+        """Return only providers with locally stored rows for this sport."""
+        with self.connect() as con:
+            return [row[0] for row in con.execute(
+                'SELECT DISTINCT provider FROM records WHERE sport=? ORDER BY provider',
+                (sport,))]
+
+    def entity_types(self, sport):
+        """Keep club, athlete and constructor selectors based on actual records."""
+        with self.connect() as con:
+            return [row[0] for row in con.execute(
+                'SELECT DISTINCT entity_type FROM records WHERE sport=? ORDER BY entity_type',
+                (sport,))]
 
     def stats(self, sport):
         with self.connect() as con:
@@ -245,11 +329,31 @@ class Archive:
             con.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, json.dumps(value)))
 
     def import_frame(self, sport, frame, source='User import'):
+        """Save already-cleaned records; retain the legacy integer return API.
+
+        Call importers.import_dataset for validation and a detailed quality report.
+        The return value counts inserts and genuine corrections, not identical
+        repeated imports (SQLite otherwise counts an unchanged UPSERT as a write).
+        """
+        report = self.import_frame_report(sport, frame, source)
+        return report['inserted_rows'] + report['updated_rows']
+
+    def import_frame_report(self, sport, frame, source='User import'):
+        """Persist accepted rows and distinguish new, corrected and unchanged data.
+
+        Source namespaces prevent an imported export from overwriting its original
+        provider. Explicit source/event identities are preferred; the fallback
+        name/date/team identity is flagged because names alone cannot distinguish
+        namesakes. A transaction guards the read/compare/write operation so the
+        report counts match the persisted database, even during background work.
+        """
         rows = []
+        source = str(source)
         namespace = hashlib.sha256(source.encode()).hexdigest()[:12]
         for i, raw in enumerate(frame.to_dict('records')):
             row = {k: _json_value(v) for k,v in raw.items()}
             row.update(sport=sport, provider=source)
+            row['import_source'] = source
             if not row.get('competitor_id'):
                 # Name-only imported identities are isolated by source; source IDs
                 # should be supplied to distinguish same-name athletes reliably.
@@ -266,12 +370,51 @@ class Archive:
                 row['source_record_id']=original_id
                 row['record_id']='import:'+hashlib.sha256((sport+'|'+source+'|'+original_id).encode()).hexdigest()
             else:
-                row.pop('record_id',None)
+                identity = '|'.join(str(row.get(key, '')) for key in (
+                    'provider', 'sport', 'season', 'event_id', 'date',
+                    'competitor_id', 'team'))
+                row['record_id'] = hashlib.sha256(identity.encode()).hexdigest()
             rows.append(row)
-        count = self.upsert(rows)
-        for season in frame['season'].astype(str).unique():
-            self.mark(source, sport, season, 'complete')
-        return count
+        counts = {'inserted_rows': 0, 'updated_rows': 0, 'unchanged_rows': 0}
+        now = utc_now()
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            for row in rows:
+                # Normalize before comparison so pandas nullable scalars, dates
+                # and nonfinite values have the exact persisted JSON semantics.
+                row = {str(key): _json_value(value) for key, value in row.items()}
+                row['season'] = str(row['season'])
+                for required in ('sport', 'provider', 'season', 'date', 'competitor_id', 'competitor'):
+                    if not row.get(required):
+                        raise ValueError('Historical record is missing ' + required)
+                if sport not in ('Soccer', 'NBA', 'AFL', 'F1'):
+                    raise ValueError('Unknown sport')
+                try:
+                    datetime.fromisoformat(str(row['date']).replace('Z', '+00:00'))
+                except ValueError as exc:
+                    raise ValueError('Historical record has an invalid ISO date.') from exc
+                existing = con.execute('SELECT payload FROM records WHERE record_id=?',
+                                       (row['record_id'],)).fetchone()
+                if existing and json.loads(existing['payload']) == row:
+                    counts['unchanged_rows'] += 1
+                    continue
+                counts['updated_rows' if existing else 'inserted_rows'] += 1
+                con.execute('''INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(record_id) DO UPDATE SET date=excluded.date,
+                    competitor=excluded.competitor, team=excluded.team,
+                    entity_type=excluded.entity_type,competition=excluded.competition,
+                    payload=excluded.payload,updated=excluded.updated''', (
+                    row['record_id'], sport, source, row['season'], str(row['date']),
+                    row['competitor_id'], row['competitor'], row.get('team') or '',
+                    row.get('entity_type') or 'athlete', row.get('competition') or '',
+                    json.dumps(row, ensure_ascii=False, allow_nan=False), now))
+        if 'season' in frame:
+            for season in frame['season'].dropna().astype(str).unique():
+                # Import completion describes the operation, not completeness of
+                # a league or season. A CSV may contain just one competitor.
+                self.mark(source, sport, season, 'imported',
+                          'User dataset imported; competition/season completeness is not verified.')
+        return counts
 
     def delete_season(self, sport, season, provider=None):
         clause, args = 'sport=? AND season=?', [sport, str(season)]
@@ -363,14 +506,19 @@ class Archive:
                   else "seed_version:" + seed.name
             if self.setting(key) == stamp:
                 continue
-            count, rows, seasons = 0, [], set()
+            count, rows, seasons = 0, [], {}
             opener = gzip.open if seed.suffix == ".gz" else open
             with opener(seed, "rt", encoding="utf-8") as stream:
                 for line in stream:
                     if not line.strip():
                         continue
                     row = json.loads(line)
-                    seasons.add((row["provider"], row["sport"], str(row["season"])))
+                    identity = (row["provider"], row["sport"], str(row["season"]))
+                    status, reason = _seed_coverage(row)
+                    previous = seasons.get(identity)
+                    priority = {'complete': 0, 'partial': 1, 'ongoing_partial': 2}
+                    if previous is None or priority[status] > priority[previous[0]]:
+                        seasons[identity] = (status, reason)
                     rows.append(row)
                     if len(rows) >= 1000:
                         count += self.upsert(rows, overwrite=(
@@ -379,18 +527,41 @@ class Archive:
             if rows:
                 count += self.upsert(rows, overwrite=(
                     seed.name.startswith("seed_soccer_cc0")))
-            for provider, sport, season in seasons:
+            for (provider, sport, season), (status, reason) in seasons.items():
                 # OpenFootball covers a selection of club leagues, NEVER all
                 # possible soccer competitions or individual players.
-                if provider == "openfootball":
-                    self.mark(provider, sport, season, "partial",
-                              "CC0 European club match results for selected leagues. "
-                              "No player statistics, lineups or comprehensive league coverage.")
-                else:
-                    self.mark(provider, sport, season, "complete")
+                self.mark(provider, sport, season, status, reason)
             self.set_setting(key, stamp)
             total += count
         # Run for existing users too: a completed previous seed stamp must not
         # prevent repairing legacy multi-league club identity fragments.
         self.reconcile_openfootball_clubs()
+        # Existing installations can already have the same immutable seed stamp.
+        # Repair misleading completed coverage labels without reimporting data or
+        # overwriting a later successful live-provider refresh.
+        self._repair_bundled_coverage()
         return total
+
+    def _repair_bundled_coverage(self):
+        """Repair old seed-only in-season labels using the saved source snapshot."""
+        with self.connect() as con:
+            groups = con.execute(
+                "SELECT provider,sport,season,MAX(updated) latest FROM records "
+                "WHERE provider IN ('f1db','boxscorelab') GROUP BY provider,sport,season").fetchall()
+            repairs = []
+            for group in groups:
+                # The most recently captured record is conservative evidence of
+                # the current local snapshot. Do not use SQLite import time to
+                # infer when the sports season ended.
+                raw = con.execute(
+                    'SELECT payload FROM records WHERE provider=? AND sport=? AND season=? '
+                    "ORDER BY COALESCE(json_extract(payload,'$.fetched_at'),'') DESC LIMIT 1",
+                    (group['provider'], group['sport'], group['season'])).fetchone()
+                if not raw:
+                    continue
+                status, reason = _seed_coverage(json.loads(raw['payload']))
+                if status == 'ongoing_partial':
+                    repairs.append((status, reason, group['provider'], group['sport'], group['season']))
+            for status, reason, provider, sport, season in repairs:
+                con.execute('UPDATE downloads SET status=?,error=? WHERE provider=? AND sport=? AND season=? AND status=?',
+                            (status, reason, provider, sport, season, 'complete'))

@@ -1,0 +1,13 @@
+{
+  "source_url": "https://github.com/f1db/f1db/releases/download/v2026.18.0/f1db-json-splitted.zip",
+  "source_sha256": "fba7a98c9b0ee946525e6ef497a86eb933f45fbf40398dd568e60196724e0840",
+  "source_rows": 27687,
+  "seed_rows": 27687,
+  "source_points_present": 8592,
+  "source_points_zero": 0,
+  "source_points_null": 19095,
+  "seed_points_present": 8592,
+  "seed_points_zero": 0,
+  "point_differences": [],
+  "difference_count": 0
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "sport": "NBA",
+  "generated_at": "2026-10-29T10:12:46+00:00",
+  "input_rows": 4,
+  "duplicates_removed": 1,
+  "invalid_rows_removed": 2,
+  "valid_rows": 1,
+  "invalid_dates": 1,
+  "missing_identity_rows": 0,
+  "conflicting_event_rows": 0,
+  "invalid_scores": 1,
+  "cleaned_rows": 0,
+  "missing_values": {
+    "rebounds": 1,
+    "assists": 1,
+    "steals": 1,
+    "blocks": 1,
+    "rating": 1
+  },
+  "numeric_conversions": {},
+  "malformed_numeric_values": {},
+  "notes": [
+    "The accepted records are stored locally. Analysis and charts use the selected sport, competition and season filters."
+  ],
+  "rejected_examples": [
+    {
+      "source_row": 4,
+      "reasons": [
+        "Invalid or missing date / season sorting marker"
+      ]
+    },
+    {
+      "source_row": 5,
+      "reasons": [
+        "points cannot be negative"
+      ]
+    }
+  ],
+  "limitations": [
+    "Optional missing measurements remain missing and are excluded from calculations.",
+    "Fraction fields such as field_goal_pct use 0–1; no ambiguous automatic rescaling.",
+    "Matching names do not establish a verified identity. Supply stable competitor_id and event_id where available.",
+    "A completed import is not evidence that a source covers a complete season."
+  ],
+  "inserted_rows": 0,
+  "updated_rows": 0,
+  "unchanged_rows": 1,
+  "source": "User import: CONTROLLED-QA-import.csv",
+  "stages": [
+    "Collect",
+    "Validate",
+    "Clean",
+    "Process",
+    "Calculate",
+    "Analyse",
+    "Visualise"
+  ]
+}
