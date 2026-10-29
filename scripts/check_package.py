@@ -17,10 +17,17 @@ import time
 
 def smoke(executable: Path, user_data: Path) -> dict:
     environment = dict(os.environ, QT_QPA_PLATFORM="offscreen", GAMESENSE_DATA_DIR=str(user_data))
-    subprocess.run([str(executable), "--smoke-test"], env=environment, check=True, timeout=120)
+    # The exhaustive ~25-screen visual suite runs separately against source.
+    # Installed-app QA focuses on representative sport pages plus a required
+    # full-history EPL/Championship club-profile regression (still real Qt).
+    subprocess.run([str(executable), "--smoke-test", "--package-smoke"],
+                   env=environment, check=True, timeout=210)
     report = json.loads((user_data / 'smoke-results.json').read_text(encoding='utf-8'))
     if not report.get('success') or not report.get('native_qt') or not report.get('screens'):
         raise RuntimeError('Packaged application did not produce a successful native screen report')
+    clubs = report.get('club_checks') or []
+    if not clubs or not any(x.get('success') for x in clubs):
+        raise RuntimeError('Installed app did not verify a real cross-league club profile')
     return report
 
 
