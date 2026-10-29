@@ -444,6 +444,9 @@ class GameSenseWindow(QMainWindow):
         layout.addWidget(self.banner)
         self.coverage_note = label('', 'muted', True)
         layout.addWidget(self.coverage_note)
+        self.history_action = button(
+            'DISCOVER REAL PLAYER HISTORY', self._dashboard_history_action, True)
+        layout.addWidget(self.history_action, alignment=Qt.AlignmentFlag.AlignLeft)
         cards = QHBoxLayout()
         self.stat_values = []
         for title in ['LOCAL RECORDS', 'IDENTITIES', 'TEAMS', 'SEASONS']:
@@ -800,6 +803,22 @@ class GameSenseWindow(QMainWindow):
         self.breadcrumb.setText('WORKSPACE / ' + self.nav_buttons[route].text().upper())
         self.refresh()
 
+    def _dashboard_history_action(self):
+        sport = self.sport_name
+        if sport == 'Soccer':
+            self._download_ronaldo_sample()
+            return
+        self.navigate('downloads')
+        provider = {'NBA':'nba_stats', 'AFL':'squiggle', 'F1':'f1db'}.get(sport)
+        if provider:
+            idx=self.provider.findData(provider)
+            if idx >= 0:
+                self.provider.setCurrentIndex(idx)
+        self.progress_text.setText(
+            'This provider is optional and has specific data coverage. '
+            'Click Discover available seasons, review the terms, '
+            'then download the years it can actually supply.')
+
     def _open_data_finder(self):
         self.navigate('downloads')
         if self.sport_name == 'Soccer':
@@ -911,6 +930,12 @@ class GameSenseWindow(QMainWindow):
                     widget.setText(fmt(stats.get(key, stats.get('identities', 0) if key == 'competitors' else 0)))
                 sources = ', '.join(self.frame.get('source', self.frame.get('provider', pd.Series(dtype=str))).dropna().astype(str).unique())
                 self.coverage_note.setText(('FICTIONAL DEMONSTRATION MODE · ' if self.demo else 'REAL LOCAL ARCHIVE · ') + (sources or 'No records for this selection. Open Data Manager to download history.') + '\nCharts show up to 10,000 selected records; filter a season for a complete local cohort.')
+                self.history_action.setText(
+                    'GET REAL CRISTIANO RONALDO · 2022 WORLD CUP'
+                    if sport=='Soccer' else
+                    'EXPLORE HISTORICAL NBA PLAYERS (1946–PRESENT)'
+                    if sport=='NBA' else
+                    'LOAD VERIFIED HISTORICAL '+sport+' DATA')
                 self._set_metrics(self.dash_metric, self.frame)
                 self._plot_dashboard()
                 self._feature_cards(self.featured, self.identities.head(3))
