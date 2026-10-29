@@ -47,7 +47,7 @@
 | Football | API-Football (optional account key) | Real player/league/team season aggregates where plan allows | Account, coverage and commercial rights restrictions |
 | AFL | [Squiggle](https://api.squiggle.com.au/) | AFL club match scores, ~2000 onward where recorded | No individual AFL player stats |
 | AFL | [AFL Data Analysis](https://github.com/akareen/AFL-Data-Analysis), **opt-in** | Historical player-game statistics from repository records | Original AFL Tables rights need review; never bundled for public redistribution |
-| NBA | BoxScore Lab, NASA? **No** — BoxScore Lab | Recent public NBA player seasons, 2022–23 onward | Older NBA years require a separately accessible provider |
+| NBA | BoxScore Lab | Recent public NBA player seasons, 2022–23 onward | Older NBA years require a separately accessible provider |
 | NBA | Official NBA Stats optional | Requestable 1946–47 onward historical player seasons | NBA endpoint can block access; no guaranteed career completeness |
 | F1 | F1DB | Driver race results since 1950 where recorded | No complete historical telemetry |
 
