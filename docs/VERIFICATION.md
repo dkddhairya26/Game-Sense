@@ -5,8 +5,8 @@ not assert that a new public release or Mac package has been published.
 
 ## Automated source checks
 
-The main engineering session reports the first complete automated suite passed:
-**58 tests plus 26 subtests**. The suite covers data validation, analytical
+The main engineering session reports the reviewed preview snapshot passed:
+**76 tests plus 26 subtests**. The suite covers data validation, analytical
 calculations, archive identity/idempotence/coverage, provider normalization,
 portrait licence/cache handling and native chart rendering. These figures are
 recorded from the executed suite, not from counting requested features.
@@ -39,6 +39,13 @@ The actual `output/package-check-Windows.json` was independently read: packaged
 native startup passed with 20 successful screen cases and no unhandled errors.
 That check is explicitly `application_only`; it does not claim the production
 installer was installed over the user's existing application.
+
+The preliminary isolated QA installer also passed. Its actual
+`output/package-check-Windows-QA.json` records a matching production executable
+hash, silent install, native startup, silent uninstall, user-data preservation and
+preservation of the existing production uninstall registration. All 20 installed
+screen cases passed with zero unhandled errors. The report explicitly says
+`installer_kind: isolated_qa` and `production_installer_tested: false`.
 
 An optimized final rebuild is required after subsequent importer/calculation
 changes. Packaging now collects Matplotlib data plus the explicit QtAgg backend
@@ -83,3 +90,10 @@ dispatch, building Windows and macOS artifacts and retaining test/package report
 without creating or publishing a release. The tag-driven workflow creates a new
 reviewable draft after both platform checks succeed. No remote CI success is
 inferred from configuration alone.
+
+Pull request #1 reviews branch `codex/gamesense-0-6-preview`, snapshot
+`0b2d1ff`. Its actual cross-platform verification run is
+https://github.com/dkddhairya26/Game-Sense/actions/runs/40801779395.
+At the first monitoring check, both Windows and macOS jobs were installing
+dependencies with no completed artifacts. A running job is not a successful
+package; final conclusions and artifact links must be recorded after completion.

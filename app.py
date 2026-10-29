@@ -66,7 +66,13 @@ def main():
                 QTimer.singleShot(100, step)
                 return
             if not pages:
-                report = {'success': all(r['success'] for r in results) and not unhandled, 'unhandled_errors': unhandled, 'native_qt': True, 'offline': True, 'screens': results,
+                search_checks = []
+                examples = {'Soccer':('statsbomb:5503','Lionel Messi'), 'NBA':('nba:2544','LeBron James'), 'AFL':('squiggle:team:4','Collingwood'), 'F1':('f1db:lewis-hamilton','Lewis Hamilton')}
+                for sport, (identity, query) in examples.items():
+                    if window.archive.count(sport, competitor_id=identity):
+                        matches = window.archive.search(sport, query)
+                        search_checks.append({'query':query,'success':identity in matches['competitor_id'].tolist()})
+                report = {'success': all(r['success'] for r in results + search_checks) and not unhandled, 'search_checks':search_checks, 'unhandled_errors': unhandled, 'native_qt': True, 'offline': True, 'screens': results,
                           'coverage': {s:window.archive.stats(s) for s in ('Soccer','NBA','AFL','F1')}}
                 report_path.write_text(json.dumps(report, indent=2), encoding='utf-8')
                 app.exit(0 if report['success'] else 1)

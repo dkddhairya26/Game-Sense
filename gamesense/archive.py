@@ -155,8 +155,13 @@ class Archive:
 
     def search(self, sport, text='', limit=100, first_season=None, last_season=None):
         # Escape LIKE syntax, so names containing %/_ remain literal searches.
-        escaped = str(text).replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-        clauses, args = ['sport=?', "(competitor LIKE ? ESCAPE '\\' OR team LIKE ? ESCAPE '\\')"], [sport, '%' + escaped + '%', '%' + escaped + '%']
+        clauses, args = ['sport=?'], [sport]
+        # Source names can include middle names (e.g. Lionel Andrés Messi).
+        # Match every literal token without merging distinct stable identities.
+        for token in str(text).split():
+            escaped = token.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            clauses.append("(competitor LIKE ? ESCAPE '\\' OR team LIKE ? ESCAPE '\\')")
+            args.extend(['%' + escaped + '%', '%' + escaped + '%'])
         if first_season is not None:
             clauses.append('season>=?'); args.append(str(first_season))
         if last_season is not None:

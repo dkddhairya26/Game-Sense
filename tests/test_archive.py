@@ -66,6 +66,12 @@ class ArchiveTests(TemporaryTest):
         self.assertEqual(len(self.archive.search('F1','%')),1)
         self.assertEqual(len(self.archive.search('F1',"' OR 1=1 --")),0)
 
+    def test_short_name_search_matches_middle_names_without_merging_identities(self):
+        self.archive.upsert([record(name='Lionel Andrés Messi Cuccittini'), record(identity='source:2', name='Lionel Other')])
+        results = self.archive.search('F1', 'Lionel Messi')
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results.iloc[0]['competitor_id'], 'source:1')
+
     def test_coverage_does_not_claim_partial_as_complete(self):
         self.archive.upsert([record()])
         self.archive.mark('test','F1','2020','partial','Only one event')

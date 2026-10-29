@@ -23,10 +23,11 @@ This section records performed checks only; it must not be read as proof of plan
 | Inspect Windows packaging command | Completed with `python scripts/build.py --dry-run`; no package was built by that command. |
 | Download page activation logic | Actual page JavaScript evaluated in a Node VM: both valid published assets activate; missing assets, an untrusted download URL and a missing release leave buttons inactive. |
 | Windows Inno Setup availability at initial audit | Not found in PATH or the default Program Files (x86) location. A later installer build requires the compiler to be installed. |
-| Automated application/analytics/provider/chart tests | Final source suite: 58 tests plus 26 subtests passed, as reported by the main engineering session. |
+| Automated application/analytics/provider/chart tests | Reviewed preview snapshot: 75 tests plus 26 subtests passed, as reported by the main engineering session. |
 | Native screens and screenshots | Current `artifacts/qa/smoke-results.json` independently read: success=true, 20 successful cases, zero unhandled errors. Twenty screenshots present in `.qa/screenshots/`; includes 1440×960 and compact1040×760 rendering. |
 | Native executable/installer builds | First Windows build succeeded: production installer 116,588,433 bytes, unsigned/unpublished. Optimized rebuild pending subsequent source changes; final hash/report must be checked. |
 | Packaged native startup | `output/package-check-Windows.json` independently read: application_only check passed, 20 screens, zero unhandled errors. Production install not claimed; isolated QA check separate. |
+| Preliminary isolated Windows QA installer | Actual QA report passed matching executable, silent install, native 20-screen startup, uninstall, user-data preservation and existing production-registration preservation. This is a separate QA AppId; production_installer_tested=false. |
 | macOS build and installation on a Mac | Not performed on this Windows workstation. CI configuration is provided; no successful Mac run is claimed. |
 | Public release publication | Not performed by the documentation/packaging work. Existing working releases were not replaced. |
 | Clean machine manual tests or student personal review | Not performed or inferred. |
@@ -58,3 +59,9 @@ preserved in the prepared configuration. The page supports explicit release
 tags; latest/prerelease discovery is used only when a reviewer chooses an empty
 tag. The Pages workflow remains a main-branch deployment and has not been run by
 this work.
+
+The reviewed snapshot on pull request #1 is `0b2d1ff`, branch
+`codex/gamesense-0-6-preview`. Cross-platform run `40801779395` was started and is
+being monitored. Its first check showed both OS jobs installing dependencies,
+without a failure or completed artifact. No Mac success is claimed before that
+job completes.
