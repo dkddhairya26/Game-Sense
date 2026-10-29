@@ -631,16 +631,23 @@ class GameSenseWindow(QMainWindow):
 
     def _build_teams(self):
         layout = self.page_layouts['teams']
-        self._heading(layout, 'TEAMS & ROSTERS', 'The people behind the badge.', 'Team membership is taken from the selected downloaded season, including recorded transfers. Neutral badges avoid unlicensed club marks.')
+        self._heading(layout, 'CLUB PERFORMANCE & ROSTERS', 'Results and the people behind them.', 'Explore real team scores, league-season performance and match logs. Rosters only appear when an actual athlete-level provider supplies them.')
         self.team_select = QComboBox()
         self.team_select.currentTextChanged.connect(self._load_team)
         layout.addWidget(self.team_select)
         self.team_note = label('', 'muted', True)
         layout.addWidget(self.team_note)
+        self.open_club_button = button(
+            'VIEW FULL VERIFIED CLUB PROFILE  →',self._open_selected_club_profile,True)
+        layout.addWidget(self.open_club_button)
         self.roster_grid = QGridLayout()
         layout.addLayout(self.roster_grid)
+        layout.addWidget(label('PERFORMANCE BY LEAGUE & SEASON','section'))
         self.team_table = self._table()
         layout.addWidget(self.team_table)
+        layout.addWidget(label('RECORDED CLUB MATCHES','section'))
+        self.team_matches = self._table(260)
+        layout.addWidget(self.team_matches)
         layout.addStretch()
 
     def _build_leaders(self):
@@ -1457,17 +1464,60 @@ class GameSenseWindow(QMainWindow):
             rows.append({'competitor':group['competitor'].iloc[-1], **metric_summary(group, metric)})
         self._fill(self.compare_table, pd.DataFrame(rows))
 
+    def _open_selected_club_profile(self):
+        team = self.team_select.currentText()
+        data = self._query(team=team,limit=20000) if team else pd.DataFrame()
+        if data.empty or 'entity_type' not in data:
+            return
+        clubs = data[data['entity_type'].astype(str).eq('team')]
+        if clubs.empty:
+            return
+        self._open_identity(str(clubs.iloc[0]['competitor_id']))
+
     def _load_team(self, *_):
         team = self.team_select.currentText()
-        data = self._query(team=team, limit=10000) if team else pd.DataFrame()
-        identities = data.drop_duplicates('competitor_id') if 'competitor_id' in data else pd.DataFrame()
-        if not identities.empty and 'entity_type' in identities:
-            athletes = identities[identities['entity_type'] != 'team']
-        else:
-            athletes = identities
-        self.team_note.setText(f'{team} · {len(data):,} downloaded records · {len(athletes):,} recorded athletes. ' + ('This source contains team match results only; no player statistics are inferred.' if not data.empty and athletes.empty else 'Cards show up to 12 athletes from this selection.'))
+        data = self._query(team=team, limit=20000) if team else pd.DataFrame()
+        identities = (
+            data.drop_duplicates('competitor_id')
+            if 'competitor_id' in data else pd.DataFrame())
+        athletes = (
+            identities.loc[identities['entity_type'].ne('team')]
+            if not identities.empty and 'entity_type' in identities
+            else pd.DataFrame())
+        clubs = (
+            identities.loc[identities['entity_type'].eq('team')]
+            if not identities.empty and 'entity_type' in identities
+            else pd.DataFrame())
+        self.open_club_button.setEnabled(not clubs.empty)
         self._feature_cards(self.roster_grid, athletes.head(12), grid=True)
-        self._fill(self.team_table, season_history(data, available_metrics(data)[:12]))
+        if not clubs.empty:
+            from .team_analytics import (
+                club_summary,club_season_table,club_match_table)
+            club_rows=data[data['entity_type'].astype(str).eq('team')]
+            result=club_summary(club_rows,self.sport_name)
+            self.team_note.setText(
+                f"{team} · {result['matches']:,} observed club games · "
+                f"{result['wins']} wins, {result['draws']} draws, "
+                f"{result['losses']} losses · "
+                f"scored {fmt(result['scored'])}, "
+                f"conceded {fmt(result['conceded'])} · "
+                f"{result['seasons']} season(s), "
+                f"{result['leagues']} league(s). "
+                + (f"{len(athletes)} separately sourced athletes. "
+                   if len(athletes) else
+                   'No verified player roster is provided by this match-result source.'))
+            self._fill(self.team_table,
+                       club_season_table(club_rows,self.sport_name))
+            self._fill(self.team_matches,
+                       club_match_table(club_rows,self.sport_name))
+        else:
+            self.team_note.setText(
+                f"{team} · {len(data):,} real athlete records · "
+                f"{len(athletes):,} known athlete identities. "
+                'Team stats are not inferred from partial player rosters.')
+            self._fill(self.team_table,
+                       season_history(data,available_metrics(data)[:12]))
+            self._fill(self.team_matches,pd.DataFrame())
 
     def _load_leaders(self, *_):
         if not hasattr(self, 'leader_table'):
