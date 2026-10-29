@@ -34,7 +34,11 @@ LEAGUES = {
     "pt.1": "Portuguese Primeira Liga", "nl.1": "Dutch Eredivisie",
     "tr.1": "Turkish Süper Lig",
 }
-DEFAULT_LEAGUES = ("en.1", "es.1", "de.1", "it.1", "fr.1", "pt.1", "nl.1")
+# English Championship and equivalent second divisions matter: clubs can
+# be relegated/promoted while preserving the same real identity.
+DEFAULT_LEAGUES = (
+    "en.1", "en.2", "es.1", "es.2", "de.1", "de.2",
+    "it.1", "it.2", "fr.1", "fr.2", "pt.1", "nl.1")
 SEASON_PATTERN = re.compile(r"^20\d{2}-\d{2}$")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
