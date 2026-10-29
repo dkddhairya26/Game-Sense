@@ -935,7 +935,29 @@ class GameSenseWindow(QMainWindow):
                 for widget, key in zip(self.stat_values, ['records','competitors','teams','seasons']):
                     widget.setText(fmt(stats.get(key, stats.get('identities', 0) if key == 'competitors' else 0)))
                 sources = ', '.join(self.frame.get('source', self.frame.get('provider', pd.Series(dtype=str))).dropna().astype(str).unique())
-                self.coverage_note.setText(('FICTIONAL DEMONSTRATION MODE · ' if self.demo else 'REAL LOCAL ARCHIVE · ') + (sources or 'No records for this selection. Open Data Manager to download history.') + '\nCharts show up to 10,000 selected records; filter a season for a complete local cohort.')
+                scope = ''
+                if not self.frame.empty and 'entity_type' in self.frame:
+                    kinds = self.frame['entity_type'].astype(str).value_counts()
+                    team_records = int(kinds.get('team', 0))
+                    athlete_records = int(kinds.get('athlete', 0))
+                    scope = (
+                        f"\nThis selection: {team_records:,} TEAM match rows and "
+                        f"{athlete_records:,} ATHLETE rows. "
+                    )
+                    if sport=='AFL' and not athlete_records:
+                        scope += ('Squiggle records include real goals, behinds, scores, '
+                                  'margins and results. For individual disposals, kicks, '
+                                  'marks or tackles, use the opt-in historical player '
+                                  'archive in Data Manager.')
+                    if sport=='Soccer' and not athlete_records:
+                        scope += ('OpenFootball supplies club matches across leagues, '
+                                  'not individual players. For Ronaldo or player career '
+                                  'stats, use a supported player-level source.')
+                self.coverage_note.setText(
+                    ('FICTIONAL DEMONSTRATION MODE · ' if self.demo else 'REAL LOCAL ARCHIVE · ')
+                    + (sources or 'No records for this selection. Open Data Manager to download history.')
+                    + scope + '\nCharts show up to 10,000 selected records; '
+                    'filter a season for a complete local cohort.')
                 self.history_action.setText(
                     'GET REAL CRISTIANO RONALDO · 2022 WORLD CUP'
                     if sport=='Soccer' else
@@ -1031,6 +1053,32 @@ class GameSenseWindow(QMainWindow):
                 ('CHAMPIONSHIP EVOLUTION', 'Championship evolution', 'championship_points')],
         }
         metrics = available_metrics(frame) if isinstance(frame, pd.DataFrame) else []
+        # Team match scores contain useful stats, but NEVER disposals/assists.
+        # The previous app showed six empty AFL panels by asking for player
+        # fields in a Squiggle club-score archive. Choose accurate charts
+        # based on the actual observational grain, not the name of the sport.
+        team_data = bool(
+            isinstance(frame, pd.DataFrame) and not frame.empty and
+            'entity_type' in frame and
+            frame['entity_type'].astype(str).eq('team').mean() >= .5)
+        if sport == 'AFL' and team_data:
+            layouts[sport] = [
+                ('CLUB SCORING THROUGH THE SEASONS', 'Season trend', 'points'),
+                ('HIGHEST-SCORING AFL CLUBS', 'Ranking', 'points'),
+                ('GOALS PER MATCH · ACTUAL RESULTS', 'Distribution', 'goals'),
+                ('DEFENSIVE POINTS CONCEDED', 'Box plot', 'points_against'),
+                ('OFFENCE VS DEFENCE · CLUBS', 'Scatter', 'points'),
+                ('CLUB PERFORMANCE PROFILE', 'Radar', 'margin'),
+            ]
+        elif sport == 'Soccer' and team_data:
+            layouts[sport] = [
+                ('CLUB GOALS BY SEASON', 'Season trend', 'goals'),
+                ('TOP SCORING CLUBS', 'Ranking', 'goals'),
+                ('GOALS CONCEDED DISTRIBUTION', 'Distribution', 'goals_against'),
+                ('ATTACK VS DEFENCE · CLUBS', 'Scatter', 'goals'),
+                ('LEAGUE TEAM PERFORMANCE', 'Radar', 'table_points'),
+                ('GOAL DIFFERENCE BY MATCH', 'Box plot', 'goal_difference'),
+            ]
         for (caption, chart), (heading, mode, preferred) in zip(
                 self.dash_visuals, layouts[sport]):
             caption.setText(heading)
@@ -1043,8 +1091,15 @@ class GameSenseWindow(QMainWindow):
                     f'{preferred.replace("_", " ").title()} is not provided by '
                     'the selected source. Load suitable real player statistics.')
             else:
-                chart.plot(frame, sport, metric=preferred if preferred in metrics
-                           else (metrics[0] if metrics else None), mode=mode)
+                second = (
+                    'points_against' if sport=='AFL' and team_data else
+                    'goals_against' if sport=='Soccer' and team_data else None)
+                chart.plot(
+                    frame, sport,
+                    metric=preferred if preferred in metrics
+                           else (metrics[0] if metrics else None),
+                    mode=mode,
+                    secondary_metric=second if mode=='Scatter' else None)
 
     def _clear_layout(self, layout):
         while layout.count():
