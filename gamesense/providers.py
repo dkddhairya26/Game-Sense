@@ -568,10 +568,13 @@ class StatsBombProvider(Provider):
 # Optional player-level sources extend coverage without altering the licensed
 # seed archive or pretending unavailable historical years have been fetched.
 from .extra_providers import NBAStatsHistoryProvider, APIFootballProvider
+from .openfootball_provider import OpenFootballProvider
+from .afl_player_provider import AFLPlayerArchiveProvider
 
 PROVIDERS={p.meta.id:p for p in [
     F1DBProvider(), NBAProvider(), NBAStatsHistoryProvider(),
-    StatsBombProvider(), APIFootballProvider(), SquiggleProvider(), JolpicaProvider()
+    StatsBombProvider(), OpenFootballProvider(), APIFootballProvider(),
+    SquiggleProvider(), AFLPlayerArchiveProvider(), JolpicaProvider()
 ]}
 
 
