@@ -1,45 +1,72 @@
-# GameSense 0.7.0 — Real History & Visual Analytics Preview
+# GameSense v0.8.0 — Real football leagues + AFL box-score preview
 
-This is a new native Windows/macOS **preview**, not a claim of universal
-historical sports coverage. Only tested release assets should be published.
+**Native Windows / Mac preview — source-backed, no fictional sports history.**
 
-## What's new
+## This version directly addresses the user's screenshots
 
-- Six simultaneous, distinct sport-specific visualisations on every dashboard,
-  plus an independent customizable deep-dive plot with hover/export features.
-- Official NBA Stats optional on-demand connector, capable of requesting
-  1946–47 onward historical player-season averages when NBA.com permits the
-  network request. This does **not** add older seasons to the bundled database.
-- API-Football (API-Sports) authenticated, user-key-only integration for
-  competition player statistics, ID-verified player searching, and available
-  player-season history. Account pricing, years and league coverage depend
-  on provider terms. Player photos are not republished from the provider.
-- Free, direct Cristiano Ronaldo **Portugal 2022 World Cup** event-data action
-  from StatsBomb Open Data. This provides real recorded match events, not a
-  complete Manchester United / Madrid / Juventus / Al Nassr career.
-- Direct historical-data discovery actions on sport dashboards; improved
-  explicit unavailable-data states and real source attribution.
-- Additional provider regression fixtures, verification for Windows/macOS
-  packaging, and privacy-conscious handling of API keys.
+- The Football home screen previously had only **35** Portugal/World Cup
+  event records. The v0.8 installer builds an additional, automatically
+  imported **CC0 European club results library**, with completed matches from
+  the Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Eredivisie and
+  Portuguese Primeira Liga for published league-seasons from 2015–16 to
+  2025–26. The CI build refuses to publish if fewer than 7,500 real team
+  records from five leagues and five seasons are available. Earlier seasons,
+  more national leagues and supported divisions can be downloaded from the
+  Data Manager without an API key.
+- **Important:** OpenFootball is a **team fixture / score** provider. Every
+  participating club is included in available league-season match files, but
+  it cannot identify the match players, goalscorers, assists or lineups.
+  Those require a genuinely player-level licensed/authorised source.
+  Cristiano Ronaldo's real Portugal 2022 World Cup match data and optional
+  API-Football player records remain separate.
+- The AFL screen previously had a sizeable club-results archive but most
+  graphs said "stat not available". The AFL dashboard now automatically
+  uses the club data actually present: final points scored, points conceded,
+  goals, behinds, margin, draws, wins and season trajectories. These are
+  actual AFL team results, not pretend individual disposals.
+- New **opt-in AFL player-game research archive**. With a clear warning about
+  the data's origin and original rights, users may locally download the
+  public [AFL Data Analysis](https://github.com/akareen/AFL-Data-Analysis)
+  research repository, which includes many historical player-match box scores
+  (kicks, marks, handballs, disposals, goals, tackles, etc.). It is NOT
+  bundled, due to underlying AFL Tables-derived dataset permissions being
+  independently unverified. It may be large and requires a network connection.
+  Early seasons lack many categories of measurements.
+- Sport dashboards distinguish **TEAM match rows vs ATHLETE rows** and
+  choose relevant chart modes based on the actual dataset rather than
+  forcing player-disposal charts onto club scores.
+- All older F1DB, NBA, user imports and existing local database files are
+  retained; new soccer starter seed imports without deleting prior records.
 
-## What is not solved
+## Source coverage and permissions
 
-- The bundled source archive retains its genuinely available data: F1DB race
-  records from 1950 to provider release; BoxScore Lab NBA player seasons
-  from 2022–23 onward. Those older NBA and Ronaldo club seasons must be
-  requested and actually returned by an approved provider.
-- No guaranteed data for all NBA seasons back to 1946 if NBA.com rejects
-  requests. No complete historical player records for every football league.
-- AFL historical downloads remain club-match results only: full athlete
-  statistics need a correctly licensed AFL provider or user import.
-- No invented event coordinates, shots, telemetry, stats or photographs.
-- These packages are unsigned preview builds. Manual clean-machine
-  Windows/macOS installation and API accounts still require user verification.
+| Sport | Source | Grain and coverage | Caveat |
+|---|---|---|---|
+| Football | [OpenFootball football.json](https://github.com/openfootball/football.json), **CC0** | Club match results for many European leagues and published 2015–26 starter seasons | NO player stats, current/live data depends on contributors |
+| Football | [StatsBomb Open Data](https://github.com/statsbomb/open-data) | Player match events for selected published competitions | Public research agreement, not worldwide club careers |
+| Football | API-Football (optional account key) | Real player/league/team season aggregates where plan allows | Account, coverage and commercial rights restrictions |
+| AFL | [Squiggle](https://api.squiggle.com.au/) | AFL club match scores, ~2000 onward where recorded | No individual AFL player stats |
+| AFL | [AFL Data Analysis](https://github.com/akareen/AFL-Data-Analysis), **opt-in** | Historical player-game statistics from repository records | Original AFL Tables rights need review; never bundled for public redistribution |
+| NBA | BoxScore Lab, NASA? **No** — BoxScore Lab | Recent public NBA player seasons, 2022–23 onward | Older NBA years require a separately accessible provider |
+| NBA | Official NBA Stats optional | Requestable 1946–47 onward historical player seasons | NBA endpoint can block access; no guaranteed career completeness |
+| F1 | F1DB | Driver race results since 1950 where recorded | No complete historical telemetry |
 
-**Do not confuse mocked provider unit tests with successful real API access.**
-See docs/HISTORY_V07.md for the specific connectors, terms, verification
-checklist, and explicit data source limitations.
+## What is still not complete
 
-The new preview is published only after both platforms build and pass the
-automated native application/package startup checks; those checks cannot
-guarantee the remote sports data providers are accessible from a user's IP.
+GameSense cannot honestly guarantee every player in every league in every
+historical season. OpenFootball supplies **clubs**, not individual footballers.
+Full club-career statistics for Ronaldo still require an appropriate
+player-level source and licence; the paid football API is not automatically
+configured for public users. The optional AFL archive covers what its public
+research publisher recorded and does not establish original data rights.
+Many historic player-specific measurements were never captured.
+
+## Testing / distribution
+
+- GitHub Actions builds an actual CC0 football starter archive **before**
+  native Windows/macOS installers, and fails if coverage is too sparse.
+- All automated tests, native screen captures and packaged smoke checks
+  must pass before the prerelease is published.
+- Binaries are unsigned. Windows SmartScreen and macOS Gatekeeper may warn.
+- End users need no Python, VS Code or Git; downloaded datasets are stored
+  in the user's local SQLite archive.
