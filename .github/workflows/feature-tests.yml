@@ -2,7 +2,7 @@ name: Validate historical connectors and premium dashboards
 on:
   push:
     branches:
-      - feature/real-history-and-multi-chart-dashboard
+      - feature/football-leagues-afl-stats-v08
   workflow_dispatch:
 permissions:
   contents: read
