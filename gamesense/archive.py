@@ -269,29 +269,55 @@ class Archive:
                 con.execute("DELETE FROM settings WHERE key LIKE 'statsbomb_match:%' AND substr(key,17) NOT IN (SELECT json_extract(payload,'$.event_id') FROM records WHERE provider='statsbomb')")
 
     def seed_bundled(self):
-        """Copy only distributable release seed rows once, never overwrite imports."""
+        """Load *each* verified redistributable historical seed once.
+
+        Old preview versions bundled a single large F1/NBA seed; keep its
+        original per-file stamp so existing users do not lose data. New CC0
+        soccer club results live in a separate gzip and never replace their
+        existing player research imports.
+        """
         base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent))
-        seed = base / 'data' / 'seed.jsonl'
-        if not seed.exists():
-            seed = base / 'data' / 'seed.jsonl.gz'
-        if not seed.exists():
+        folder = base / "data"
+        if not folder.is_dir():
             return 0
-        stamp = hashlib.sha256(seed.read_bytes()).hexdigest()
-        if self.setting('seed_version') == stamp:
-            return 0
-        count, rows, seasons = 0, [], set()
-        opener = gzip.open if seed.suffix == '.gz' else open
-        with opener(seed, 'rt', encoding='utf-8') as stream:
-            for line in stream:
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                seasons.add((row['provider'], row['sport'], str(row['season'])))
-                rows.append(row)
-                if len(rows) >= 1000:
-                    count += self.upsert(rows,overwrite=False); rows = []
-        count += self.upsert(rows,overwrite=False)
-        for provider,sport,season in seasons:
-            self.mark(provider,sport,season,'complete')
-        self.set_setting('seed_version', stamp)
-        return count
+        sources = sorted(path for path in folder.iterdir()
+                         if path.is_file() and (
+                             path.name.startswith("seed_") or
+                             path.name.startswith("seed.")
+                         ) and (
+                             path.name.endswith(".jsonl") or
+                             path.name.endswith(".jsonl.gz")
+                         ))
+        total = 0
+        for seed in sources:
+            stamp = hashlib.sha256(seed.read_bytes()).hexdigest()
+            key = "seed_version" if seed.name in ("seed.jsonl", "seed.jsonl.gz") \
+                  else "seed_version:" + seed.name
+            if self.setting(key) == stamp:
+                continue
+            count, rows, seasons = 0, [], set()
+            opener = gzip.open if seed.suffix == ".gz" else open
+            with opener(seed, "rt", encoding="utf-8") as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    row = json.loads(line)
+                    seasons.add((row["provider"], row["sport"], str(row["season"])))
+                    rows.append(row)
+                    if len(rows) >= 1000:
+                        count += self.upsert(rows, overwrite=False)
+                        rows = []
+            if rows:
+                count += self.upsert(rows, overwrite=False)
+            for provider, sport, season in seasons:
+                # OpenFootball covers a selection of club leagues, NEVER all
+                # possible soccer competitions or individual players.
+                if provider == "openfootball":
+                    self.mark(provider, sport, season, "partial",
+                              "CC0 European club match results for selected leagues. "
+                              "No player statistics, lineups or comprehensive league coverage.")
+                else:
+                    self.mark(provider, sport, season, "complete")
+            self.set_setting(key, stamp)
+            total += count
+        return total
