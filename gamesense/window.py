@@ -1241,47 +1241,175 @@ class GameSenseWindow(QMainWindow):
         if not hasattr(self, 'profile_chart'):
             return
         cid = self.athlete.currentData()
-        self.profile_frame = self._query(competitor_id=cid, limit=50000) if cid else pd.DataFrame()
-        data = self.profile_frame
-        identity = self.identities[self.identities['competitor_id'].astype(str) == str(cid)] if not self.identities.empty else pd.DataFrame()
-        name = str(identity.iloc[0]['competitor']) if not identity.empty else 'No matching identity in this archive'
-        is_team = not identity.empty and identity.iloc[0].get('entity_type') == 'team'
+        identity = (
+            self.identities[self.identities['competitor_id'].astype(str) == str(cid)]
+            if cid and not self.identities.empty else pd.DataFrame())
+        name = (
+            str(identity.iloc[0]['competitor']) if not identity.empty
+            else 'Select a club, player or driver')
+        is_team = bool(
+            not identity.empty and identity.iloc[0].get('entity_type') == 'team')
+        self.profile_full_history.setVisible(is_team)
+        self.profile_tabs.setTabVisible(self.profile_match_index, is_team)
+        self.profile_eyebrow.setText(
+            'VERIFIED CLUB RESULTS' if is_team else 'ATHLETE / DRIVER PROFILE')
+        full_history = is_team and self.profile_full_history.isChecked()
+        if not cid:
+            data = pd.DataFrame()
+        elif full_history and not self.demo:
+            # Team profiles are a club's REAL complete local history, even
+            # when the global archive picker is set to one league/season.
+            data = self.archive.query(
+                self.sport_name, competitor_id=cid, limit=75000)
+        else:
+            data = self._query(competitor_id=cid, limit=75000)
+        self.profile_frame = data
         self.profile_name.setText(name)
-        self.image_credit.setText('Original placeholder · no verified portrait.' if is_team or not cid else 'Loading cached portrait and verified attribution…')
-        self.portrait.set_athlete(str(cid or 'empty'), name if cid else '', self.sport_name, online=self._online() and bool(cid) and not self.demo and not is_team)
-        teams = ', '.join(data.get('team', pd.Series(dtype=str)).dropna().astype(str).unique())
+        self.image_credit.setText(
+            'Neutral team silhouette · no official club badge has been licensed.'
+            if is_team else
+            'Licensed athlete images are shown only when verified and available.')
+        self.portrait.set_athlete(
+            str(cid or 'empty'), name if cid else '', self.sport_name,
+            online=self._online() and bool(cid) and not self.demo and not is_team)
         years = sorted(data.get('season', pd.Series(dtype=str)).dropna().astype(str).unique())
-        self.profile_meta.setText(self.sport_name + (' · Team record' if is_team else ' · Athlete / driver') + '\n' + (teams or 'No records in the selected season') + ('\n' + years[0] + ' — ' + years[-1] if years else ''))
-        details = []
-        for field in ('position','nationality'):
-            if field in data:
-                values = data[field].dropna().astype(str).unique()
-                if len(values):
-                    details.append(', '.join(values[:3]))
-        if details:
-            self.profile_meta.setText(self.profile_meta.text() + '\n' + ' · '.join(details))
-        self.profile_summary.setText(f"{len(data):,} local records  /  {len(years)} seasons" if not data.empty else 'Download the relevant provider archive to retrieve missing history.')
-        hero_keys = {'F1':['wins','podiums','points'],'NBA':['points','rebounds','assists'],'Soccer':['goals','assists','xg'],'AFL':['wins','goals','points']}[self.sport_name]
-        for (value, caption), metric in zip(self.hero_metrics, hero_keys):
-            values = metric_summary(data, metric)
-            value.setText(fmt(values['total']))
-            caption.setText(metric.replace('_',' ').upper() + ' · LOCAL TOTAL')
-        self._set_metrics(self.profile_metric, data)
-        metrics = available_metrics(data)
-        self._fill(self.history_table, season_history(data, metrics[:16]))
-        rows = [{'statistic':m, **metric_summary(data,m)} for m in metrics]
-        self._fill(self.advanced_table, pd.DataFrame(rows))
-        self.profile_sources.setText('\n\n'.join(f'{k}: ' + ', '.join(data[k].dropna().astype(str).unique()[:20]) for k in ['provider','source','source_url','license','record_type','record_kind','entity_type'] if k in data) + '\n\nProfile limit: 50,000 stored rows. Seasons without records are not assumed to have zero performance. Positions and percentages use averages; counting metrics use totals. Season rows require games played for per-game values.')
-        self.fav_button.setText('Saved favourite' if str(cid) in self._favourites() else 'Save favourite')
+        leagues = sorted(data.get('competition', pd.Series(dtype=str)).dropna().astype(str).unique())
+        if is_team:
+            from .team_analytics import (
+                club_summary, club_season_table, club_match_table)
+            team_stats = club_summary(data, self.sport_name)
+            self.profile_meta.setText(
+                f'{self.sport_name} · CLUB / TEAM · VERIFIED FINAL MATCHES\n'
+                + (f"{len(leagues)} downloaded competition(s): "
+                   + ', '.join(leagues[:8]) if leagues else 'No league data in this selection')
+                + (f"\nSeasons: {years[0]} — {years[-1]}" if years else ''))
+            self.profile_summary.setText(
+                f"{team_stats['matches']:,} played club matches · "
+                f"{team_stats['seasons']} seasons · "
+                f"{team_stats['leagues']} competitions."
+                if team_stats['matches'] else
+                'No completed club matches for this selection. '
+                'Try full downloaded history or load the correct league in Data Manager.')
+            stat_items = [
+                ('MATCHES PLAYED',team_stats['matches']),
+                ('MATCHES WON',team_stats['wins']),
+                (('GOALS SCORED · CLUB' if self.sport_name=='Soccer'
+                  else 'POINTS SCORED · CLUB'),team_stats['scored'])]
+            for (value,caption),(title,measure) in zip(self.hero_metrics,stat_items):
+                value.setText(fmt(measure))
+                caption.setText(title)
+            if team_stats['matches']:
+                text = (
+                    f"W {team_stats['wins']}  ·  D {team_stats['draws']}  ·  "
+                    f"L {team_stats['losses']}  ·  "
+                    f"For {fmt(team_stats['scored'])}  ·  "
+                    f"Against {fmt(team_stats['conceded'])}  ·  "
+                    f"Difference {fmt(team_stats['difference'])}  ·  "
+                    f"Win rate {team_stats['win_rate']:.1f}%")
+                if self.sport_name == 'Soccer' and team_stats['league_points'] is not None:
+                    text += f"  ·  Reported 3/1/0 match points {fmt(team_stats['league_points'])}"
+                self.profile_breakdown.setText(text)
+            else:
+                self.profile_breakdown.setText(
+                    'Missing matches are never interpreted as losses or 0-0 results.')
+            self._fill(self.history_table, club_season_table(data,self.sport_name))
+            self._fill(self.profile_match_table, club_match_table(data,self.sport_name))
+            summary_rows = [
+                {'statistic':'Final match records','value':team_stats['matches']},
+                {'statistic':'Wins','value':team_stats['wins']},
+                {'statistic':'Draws','value':team_stats['draws']},
+                {'statistic':'Losses','value':team_stats['losses']},
+                {'statistic':'Goals scored' if self.sport_name=='Soccer'
+                 else 'Points scored','value':team_stats['scored']},
+                {'statistic':'Goals conceded' if self.sport_name=='Soccer'
+                 else 'Points conceded','value':team_stats['conceded']},
+                {'statistic':'Goal / point difference','value':team_stats['difference']},
+                {'statistic':'Win percentage','value':team_stats['win_rate']},
+            ]
+            if team_stats['league_points'] is not None:
+                summary_rows.append(
+                    {'statistic':'3/1/0 match points in observed fixtures',
+                     'value':team_stats['league_points']})
+            self._fill(self.advanced_table,pd.DataFrame(summary_rows))
+            self.profile_sources.setText(
+                'This is a CLUB / TEAM profile. All goals and final scores are '
+                'team-level; player goals, assists, lineups and xG are not inferred.\n\n'
+                + ('Full downloaded club history shown across competition and '
+                   'season filters. Uncheck the history option to apply the '
+                   'top-of-page filters.\n\n' if full_history else
+                   'Only the selected season and competition are shown.\n\n')
+                + self._profile_provenance(data))
+        else:
+            self.profile_breakdown.setText('')
+            self.profile_meta.setText(
+                self.sport_name + ' · Athlete / driver\n'
+                + (', '.join(data.get('team',pd.Series(dtype=str)).dropna().astype(str).unique()[:6])
+                   or 'No records in the selected season')
+                + (f"\n{years[0]} — {years[-1]}" if years else ''))
+            self.profile_summary.setText(
+                f"{len(data):,} local records · {len(years)} seasons"
+                if not data.empty else
+                'Download an approved player-level provider archive to retrieve missing history.')
+            hero_keys = {
+                'F1':['wins','podiums','points'],
+                'NBA':['points','rebounds','assists'],
+                'Soccer':['goals','assists','xg'],
+                'AFL':['disposals','goals','tackles']}[self.sport_name]
+            for (value,caption),metric in zip(self.hero_metrics,hero_keys):
+                score=metric_summary(data,metric)
+                value.setText(fmt(score['total']))
+                caption.setText(metric.replace('_',' ').upper()+' · LOCAL TOTAL')
+            metrics=available_metrics(data)
+            self._fill(self.history_table,season_history(data,metrics[:16]))
+            self._fill(self.advanced_table,pd.DataFrame(
+                [{'statistic':m,**metric_summary(data,m)} for m in metrics]))
+            self.profile_sources.setText(self._profile_provenance(data))
+        self._set_metrics(self.profile_metric,data)
+        self.fav_button.setText(
+            'Saved favourite' if str(cid) in self._favourites()
+            else 'Save favourite')
         self._plot_profile()
+
+    @staticmethod
+    def _profile_provenance(data):
+        note = '\n\n'.join(
+            f"{key}: "+', '.join(data[key].dropna().astype(str).unique()[:16])
+            for key in ('provider','source_url','license','record_kind','entity_type')
+            if key in data)
+        return (note or 'No source records for this selection.') + (
+            '\n\nAll statistics reflect downloaded completed records only. '
+            'Historical coverage is not guaranteed complete. Missing values '
+            'are unknown, never filled with zero.')
 
     def _plot_profile(self, *_):
         if not hasattr(self, 'profile_chart'):
             return
-        metric = self.profile_metric.currentText()
-        self.profile_chart.plot(self.profile_frame, self.sport_name, metric=metric or None, mode=self.profile_mode.currentText())
-        stats = metric_summary(self.profile_frame, metric)
-        self.profile_detail.setText(f"{metric.replace('_',' ').title() or 'Statistic'} · Total {fmt(stats['total'])} · Average per recorded row {fmt(stats['average'])} · Per game {fmt(stats['per_game'])} · Best {fmt(stats['best'])} · {stats['count']} observations. Partial downloaded history is not a complete career.")
+        data=getattr(self,'profile_frame',pd.DataFrame())
+        metric=self.profile_metric.currentText()
+        mode=self.profile_mode.currentText()
+        self.profile_chart.plot(
+            data,self.sport_name,metric=metric or None,mode=mode)
+        summary=metric_summary(data,metric)
+        club=bool(
+            not data.empty and 'entity_type' in data
+            and data['entity_type'].astype(str).eq('team').all())
+        if club:
+            self.profile_detail.setText(
+                f"Club {metric.replace('_',' ').title() or 'result'} · "
+                f"Observed total {fmt(summary['total'])} · "
+                f"Average per finished match {fmt(summary['average'])} · "
+                f"Best observed match {fmt(summary['best'])} · "
+                f"{summary['count']} matches with this measure. "
+                "Sources include CLUB final results only; historical coverage may be incomplete.")
+        else:
+            self.profile_detail.setText(
+                f"{metric.replace('_',' ').title() or 'Statistic'} · "
+                f"Total {fmt(summary['total'])} · "
+                f"Average per recorded row {fmt(summary['average'])} · "
+                f"Per game {fmt(summary['per_game'])} · "
+                f"Best {fmt(summary['best'])} · "
+                f"{summary['count']} observations. Partial downloaded history "
+                "is not a complete career.")
 
     def _favourites(self):
         value = self.settings.value('favourites', '[]')
