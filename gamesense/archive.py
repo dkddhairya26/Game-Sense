@@ -153,12 +153,15 @@ class Archive:
         frame['date'] = pd.to_datetime(frame['date'], errors='coerce', utc=True).dt.tz_localize(None)
         return frame
 
-    def search(self, sport, text='', limit=100, first_season=None, last_season=None, competition=None):
+    def search(self, sport, text='', limit=100, first_season=None, last_season=None, competition=None, season=None):
         # Escape LIKE syntax, so names containing %/_ remain literal searches.
         clauses, args = ['sport=?'], [sport]
         if competition and competition != 'All competitions':
             clauses.append('competition=?')
             args.append(str(competition))
+        if season and season not in ('All downloaded seasons','All seasons'):
+            clauses.append('season=?')
+            args.append(str(season))
         # Source names can include middle names (e.g. Lionel Andrés Messi).
         # Match every literal token without merging distinct stable identities.
         for token in str(text).split():
@@ -169,10 +172,14 @@ class Archive:
             clauses.append('season>=?'); args.append(str(first_season))
         if last_season is not None:
             clauses.append('season<=?'); args.append(str(last_season))
-        sql = '''SELECT competitor_id,competitor,entity_type,MIN(season) first_season,
+        sql = '''SELECT competitor_id,
+                 (SELECT r2.competitor FROM records r2
+                  WHERE r2.competitor_id=records.competitor_id AND r2.sport=records.sport
+                  ORDER BY r2.date DESC,r2.record_id LIMIT 1) competitor,
+                 entity_type,MIN(season) first_season,
                  MAX(season) last_season,COUNT(*) records,
                  (SELECT r2.team FROM records r2 WHERE r2.competitor_id=records.competitor_id
-                  AND r2.sport=records.sport ORDER BY r2.date DESC LIMIT 1) team
+                  AND r2.sport=records.sport ORDER BY r2.date DESC,r2.record_id LIMIT 1) team
                  FROM records WHERE ''' + ' AND '.join(clauses) + ' GROUP BY competitor_id ORDER BY competitor COLLATE NOCASE LIMIT ?'
         args.append(max(1, min(int(limit), 10000)))
         with self.connect() as con:
@@ -291,11 +298,11 @@ class Archive:
         changed = 0
         updates = []
         with self.connect() as con:
-            cursor = con.execute(
+            source_rows = con.execute(
                 "SELECT record_id, competitor_id, payload FROM records "
                 "WHERE sport='Soccer' AND provider='openfootball' "
-                "AND entity_type='team'")
-            for record_id, previous, payload in cursor:
+                "AND entity_type='team'").fetchall()
+            for record_id, previous, payload in source_rows:
                 record = json.loads(payload)
                 code = str(record.get("competition_id") or "")
                 if not code:
