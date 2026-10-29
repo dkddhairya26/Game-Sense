@@ -2,7 +2,7 @@
 
 Native desktop sports analytics for **football/soccer, NBA, AFL and Formula 1**. GameSense combines a local historical archive, real source records, athlete/team exploration, licensed portraits where available and interactive Matplotlib figures inside PySide6/Qt. It does not run a website or require a local web server.
 
-Version 0.6.0 is a **preview engineering upgrade**, prepared locally for review against the repository's newer public releases. It has not been published by these local edits. Coverage is determined by the selected provider and the records actually downloaded. It does **not** claim every athlete, statistic or historical event across all four sports. AFL team results remain labelled as team results; missing metrics and unavailable spatial/telemetry data are not fabricated. Fictional records are available only through an explicitly labelled demonstration mode.
+Version **[0.6.0-beta.1](https://github.com/dkddhairya26/Game-Sense/releases/tag/v0.6.0-beta.1)** is a published preview, built from commit `920f3af` after native Windows and macOS checks passed. Earlier releases are preserved. Coverage is determined by the selected provider and records actually downloaded; it does **not** include every athlete, metric or historical event across all four sports. AFL team results remain labelled as team results. Missing measurements and unavailable telemetry are not fabricated. Fictional records are confined to an explicitly labelled demonstration mode.
 
 | Sport/source | Implemented scope | Material limit |
 | --- | --- | --- |
@@ -18,10 +18,15 @@ Read provider terms before enabling downloads or distributing derived work. Free
 
 Public download page: **https://dkddhairya26.github.io/Game-Sense/**. Download buttons activate only when GitHub confirms matching published release assets:
 
-- Windows: `GameSenseSetup-Windows.exe`
-- macOS: `GameSense-macOS.dmg`
+- [Windows x64 installer](https://github.com/dkddhairya26/Game-Sense/releases/download/v0.6.0-beta.1/GameSenseSetup-Windows.exe)
+- [macOS Apple Silicon disk image](https://github.com/dkddhairya26/Game-Sense/releases/download/v0.6.0-beta.1/GameSense-macOS.dmg)
 
-Installers and publication are separate from source availability. A configured workflow is not evidence that a working Mac build or public release has been produced. Inspect the release notes, package check reports and checksums for an actual release. Builds are not trusted-code-signed; macOS notarisation is not configured.
+Both packages passed automated native startup and installation/mount checks on
+their target OS; reports and checksums accompany the public release. The Mac app
+is **arm64 for Apple Silicon**. Its bundled dependencies require **macOS 14+**;
+the package was tested on macOS 26, not on every earlier compatible version. An
+Intel Mac package is not supplied. Builds are not trusted-code-signed or notarised,
+and manual interactive clean-machine testing remains unverified.
 
 Once a native package is installed, users need no Python, Git, VS Code or terminal. Internet is required to retrieve additional data and portraits; downloaded records and cached images remain accessible offline.
 

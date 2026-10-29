@@ -1,7 +1,8 @@
 # Verification record — 0.6.0 preview
 
-Updated 29 October 2026. Results describe the local engineering preview; they do
-not assert that a new public release or Mac package has been published.
+Updated 29 October 2026. New public preview **v0.6.0-beta.1** was published after
+both native platform checks passed. Final release evidence is recorded below;
+earlier local/CI results are retained as development history.
 
 ## Automated source checks
 
@@ -133,3 +134,47 @@ These hashes identify the verification-run files. A subsequent release build can
 have different bytes; use the SHA256SUMS files accompanying that release when
 checking its downloads. Both automated platform checks passed. Trusted signing,
 notarisation and manual interactive clean-machine tests remain unverified.
+
+## Final published release — commit 920f3af
+
+Release workflow
+[40803379902](https://github.com/dkddhairya26/Game-Sense/actions/runs/40803379902)
+completed both package jobs and `publish-preview` successfully. The source tag
+resolves to `920f3af279130b24c933e81da624eeb72c888b79`, incorporating the final
+roster sizing, initial leaderboard order, explorer column order and chart spacing
+fixes. Runtime code was frozen before these builds.
+
+The GitHub release API independently confirmed release `427385422`,
+`draft: false`, `prerelease: true`, published 29 October 2026, with all ten assets
+uploaded. Public release:
+https://github.com/dkddhairya26/Game-Sense/releases/tag/v0.6.0-beta.1.
+
+| Public installer | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `GameSenseSetup-Windows.exe` | 66,985,434 | `1e6fe0a434ef2e53a73e42f8322f676b4c654a111520b0005a8b4dc729ed8491` |
+| `GameSense-macOS.dmg` | 83,978,163 | `0deef44c0cbecb5137dbd47919ede6b2be6a9cc13c2da426b013eb8550bafafb` |
+
+The release includes corresponding SHA256SUMS, build reports, package-check
+reports and JUnit results. Windows job `123216479904` logged 76 passing tests plus
+26 subtests and passed silent install, installed native startup, uninstall and
+user-data preservation. Mac job `123216479668` logged the same test counts and
+passed DMG mount and mounted native startup. Publication job `123217733368`
+succeeded after those package checks. Existing v0.4/v0.5 releases were not
+overwritten; the new release does not change latest stable.
+
+Final release-run artifacts are Windows `12867212065` and Mac `12866853924`.
+These ZIP artifacts are separate from the public installer files and hashes
+listed above.
+
+The final Mac log explicitly reports `EXE target arch: arm64`, using the native
+macOS 26 arm64 runner. Qt 6.12 and NumPy 2.5.4 wheel tags require macOS 14+.
+Therefore the package is labelled **Apple Silicon, macOS 14+ dependency
+requirement**, with startup **tested on macOS 26**. Intel compatibility and startup
+on every earlier supported version are not claimed. Developer ID signing,
+notarisation and manual interactive clean-machine checks remain unverified.
+
+The actual final page JavaScript passed **ten offline cases**. The two real
+published installers enable; missing assets/platforms, untrusted hosts, draft
+responses, unfinished/zero-byte uploads, missing tags, rate limits and invalid
+configuration leave the relevant downloads disabled. The test also verified the
+pinned v0.6.0-beta.1 endpoint and explicit Windows x64 / Mac Apple Silicon labels.

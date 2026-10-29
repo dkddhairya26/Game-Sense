@@ -35,7 +35,7 @@ This section records performed checks only; it must not be read as proof of plan
 | Preliminary isolated Windows QA installer | Actual QA report passed matching executable, silent install, native 20-screen startup, uninstall, user-data preservation and existing production-registration preservation. This is a separate QA AppId; production_installer_tested=false. |
 | macOS CI package | Final snapshot 8a77952: tests, native screenshots, DMG creation, image verification and mounted native startup all passed on macos-latest, job 123212581869 / run 40802119873. Artifact 12865909562; manual interaction/notarisation remain unverified. |
 | Windows CI package | Same snapshot/run: job 123212582138 passed tests, native screenshots, installer creation, actual silent production install, native startup, uninstall and user-data preservation. Artifact 12866418491; manual interaction/trusted signing remain unverified. |
-| Public release publication | Not performed by the documentation/packaging work. Existing working releases were not replaced. |
+| Public release publication | New v0.6.0-beta.1 published by successful release run 40803379902 from source 920f3af. Both native package checks passed; all ten public assets confirmed. Existing releases preserved. |
 | Clean machine manual tests or student personal review | Not performed or inferred. |
 
 Keep real command outputs, screenshots, source manifests, teacher-shared progress evidence and the student's own review alongside this record. Use version control history to distinguish code creation from subsequent verification and personal modifications.

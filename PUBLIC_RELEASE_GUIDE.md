@@ -1,12 +1,16 @@
 # Building and reviewing the GameSense 0.6.0 preview
 
-The repository is `dkddhairya26/Game-Sense`; its public download page is `https://dkddhairya26.github.io/Game-Sense/`. Source changes, a local package, CI artifacts and a published release are distinct states. Only actual published installer assets enable the page's download buttons.
+The repository is `dkddhairya26/Game-Sense`; its public download page is
+`https://dkddhairya26.github.io/Game-Sense/`. New public preview
+[v0.6.0-beta.1](https://github.com/dkddhairya26/Game-Sense/releases/tag/v0.6.0-beta.1)
+was published on 29 October 2026 from commit `920f3af`. Both native platform jobs
+passed before publication. Source changes, local packages, CI artifacts and a
+published release remain distinct states; the page enables only confirmed assets.
 
-Remote review found newer existing public releases than the local starting
-checkout, including v0.4.0-beta.1 and v0.5.0-beta.1. Preserve those releases and
-reconcile this work through a separate branch/review. These prepared page edits
-have not been deployed, and the local 0.6.0 preview does not replace the published
-version. A prerelease tag such as `v0.6.0-beta.1` is supported by the workflow.
+Remote review found v0.4.0-beta.1 and v0.5.0-beta.1 were newer than the starting
+local checkout. They were preserved. The new 0.6.0 prerelease does not overwrite
+those assets or become latest stable. Its source is on the tagged preview branch;
+the companion page update is a separate main-branch deployment.
 
 ## Local build
 
@@ -15,6 +19,12 @@ Install the dependencies from `requirements.txt` on the target OS. For a standal
 Windows needs Inno Setup 6. The build checks `GAMESENSE_ISCC`, `tools/inno/ISCC.exe`, PATH and normal installation locations. It does not silently install a compiler. `build_exe_windows.bat` produces `dist/GameSense/`; `build_windows.bat` produces `output/GameSenseSetup-Windows.exe`. Distribute the full folder if using the executable build, since its dependencies live beside it.
 
 On a Mac, `bash build_macos.sh` builds `dist/GameSense.app` and `output/GameSense-macOS.dmg`. `hdiutil` places the app and an Applications shortcut inside a fresh staging directory. An existing DMG is not overwritten. The app has a local ad-hoc signature for bundle integrity, not an Apple Developer ID signature or notarisation. This Windows workstation cannot prove the macOS build succeeds.
+
+The published Mac package was built and mounted successfully on the native
+macOS 26 arm64 runner. PyInstaller explicitly reports target architecture `arm64`;
+this is an Apple Silicon build, not an Intel/universal application. Its Qt and
+NumPy wheel requirements establish a macOS 14+ dependency floor. Startup on
+macOS 14/15 specifically was not tested; do not present those versions as tested.
 
 If a production GameSense installation already exists, the package checker
 refuses to overwrite its uninstall registration. Compile an isolated QA installer
@@ -68,8 +78,8 @@ The workflow's API permissions and repository access must exist on GitHub. No wo
 
 ## Download page
 
-`docs/release-config.js` names the actual repository and preserves the existing
-public `v0.5.0-beta.1` selection. The page queries that configured tag and enables
+`docs/release-config.js` names the actual repository and now selects the confirmed
+public `v0.6.0-beta.1` release. The page queries that configured tag and enables
 a platform button only when the corresponding asset is returned:
 
 - `GameSenseSetup-Windows.exe`
@@ -77,13 +87,19 @@ a platform button only when the corresponding asset is returned:
 
 Buttons use GitHub's returned `browser_download_url`; no guessed download URL is advertised as working. If the API is unavailable, rate limited or missing an asset, the page keeps that platform unavailable and links to the releases page. The existing configured release remains available until the new preview's assets have been published and the page tag is deliberately updated.
 
-After a reviewed new release has actually been published, explicitly update the
+After a new release has actually been published, explicitly update the
 configured tag. A local preview build does not change the public selection.
 Alternatively, an empty tag opts into latest-release discovery. In that mode,
 if GitHub reports no stable release, the page checks published release entries
 for an actual preview installer and clearly labels prerelease downloads as
 previews. Drafts are never offered. This matters for repositories whose public
 versions are currently beta releases.
+
+The final page logic passed ten offline cases using actual published asset
+metadata. It rejects draft releases, unfinished/zero-byte assets, untrusted
+download hosts, unavailable platforms, missing tags, rate limits and invalid
+configuration. A button requires an uploaded asset with positive size. The Mac
+label explicitly identifies Apple Silicon and the dependency minimum.
 
 For GitHub Pages, set the repository Pages source to GitHub Actions. `.github/workflows/pages.yml` deploys `docs/` from `main`. Publishing the page or a release requires authorized remote access; these local edits do not claim that deployment has happened.
 
