@@ -20,6 +20,14 @@ from .http import HttpClient
 from .providers import Provider, ProviderMeta, _base, _number
 
 
+def _id(value):
+    """Normalize integer IDs, including floats created by Pandas iterrows."""
+    try:
+        return str(int(float(value)))
+    except (ValueError, TypeError, OverflowError):
+        return str(value)
+
+
 def _num(value):
     try:
         return float(value) if value not in ('', None) else None
@@ -59,7 +67,7 @@ class NBAStatsHistoryProvider(Provider):
         extras = {}
         if advanced is not None and not advanced.empty and 'PLAYER_ID' in advanced:
             for _, item in advanced.iterrows():
-                extras[str(item['PLAYER_ID'])] = dict(item)
+                extras[_id(item['PLAYER_ID'])] = dict(item)
         fields = {
             'GP':'games', 'GS':'starts','MIN':'minutes', 'PTS':'points',
             'REB':'rebounds','AST':'assists','STL':'steals','BLK':'blocks',
@@ -76,7 +84,7 @@ class NBAStatsHistoryProvider(Provider):
             pid = player.get('PLAYER_ID')
             if pid is None:
                 continue
-            pid = str(int(pid)) if str(pid).replace('.0','').isdigit() else str(pid)
+            pid = _id(pid)
             team_id = str(player.get('TEAM_ID') or '')
             team = player.get('TEAM_ABBREVIATION') or 'Not specified'
             name = player.get('PLAYER_NAME')
