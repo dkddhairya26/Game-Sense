@@ -947,6 +947,9 @@ class GameSenseWindow(QMainWindow):
 
     def _season_changed(self, *_):
         self.page_offset = 0
+        # The identity picker must reflect the selected year. v0.8 displayed
+        # older clubs with NO records in the chosen season.
+        self._update_identities()
         self.refresh()
 
     def _query(self, competitor_id=None, team=None, limit=5000, offset=0):
