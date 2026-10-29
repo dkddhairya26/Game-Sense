@@ -11,8 +11,12 @@ import traceback
 def main():
     parser = argparse.ArgumentParser(description='GameSense sports intelligence desktop')
     parser.add_argument('--smoke-test', action='store_true', help='Render major screens offline, write a report, and exit')
+    parser.add_argument('--package-smoke', action='store_true',
+                        help='After installation verify representative native screens and the real club-history regression without capturing the exhaustive UI matrix')
     parser.add_argument('--screenshots', type=Path, help='Save rendered native window screenshots during the smoke test')
     args = parser.parse_args()
+    if args.package_smoke and not args.smoke_test:
+        parser.error('--package-smoke requires --smoke-test')
     if args.smoke_test:
         os.environ['GAMESENSE_OFFLINE'] = '1'
     from PySide6.QtCore import QTimer
@@ -60,6 +64,21 @@ def main():
         pages += [('profiles','Soccer','soccer-shot-map'),('profiles','F1','f1-grid-comparison'),('profiles','F1','f1-pit-stops')]
         pages += [(route,'F1',route) for route in ('teams','compare','leaders','explorer','downloads','settings','about')]
         pages += [('dashboard','NBA','nba-compact')]
+        if args.package_smoke:
+            # Windows can take more than two minutes to render 20+ full
+            # Matplotlib screens from the expanded 100k-record archive.
+            # Run the exhaustive visual matrix in source CI; on the actually
+            # installed app validate the key sport pages and specifically
+            # the Aston Villa EPL + Championship match-history regression.
+            pages = [
+                ('home','Soccer','overview'),
+                ('dashboard','Soccer','soccer-dashboard'),
+                ('profiles','Soccer','soccer-profile'),
+                ('dashboard','AFL','afl-dashboard'),
+                ('dashboard','NBA','nba-dashboard'),
+                ('dashboard','F1','f1-dashboard'),
+                ('downloads','Soccer','downloads'),
+            ]
         results = []
         def step():
             if window.initializing:
