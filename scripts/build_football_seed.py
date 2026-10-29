@@ -17,10 +17,11 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import time
-
-from gamesense.openfootball_provider import DEFAULT_LEAGUES, REPO, fixture_records
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))  # Running python scripts/build_football_seed.py from CI
+from gamesense.openfootball_provider import DEFAULT_LEAGUES, REPO, fixture_records
 DEST = ROOT / "data" / "seed_soccer_cc0.jsonl.gz"
 FIRST = 2015
 LAST = 2025
