@@ -7,3 +7,7 @@ dist/
 output/
 *.spec
 *.dmg
+.qa/
+tools/
+artifacts/
+/tmp*/
