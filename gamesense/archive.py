@@ -278,6 +278,57 @@ class Archive:
             if provider in (None,'statsbomb'):
                 con.execute("DELETE FROM settings WHERE key LIKE 'statsbomb_match:%' AND substr(key,17) NOT IN (SELECT json_extract(payload,'$.event_id') FROM records WHERE provider='statsbomb')")
 
+    def reconcile_openfootball_clubs(self) -> int:
+        """Repair existing v0.8 team IDs without discarding user history.
+
+        v0.8 used a league-specific club name as its ID; Aston Villa and
+        Aston Villa FC were different identities. Reconcile those to stable
+        country-scoped club identifiers, including years already saved in the
+        current user's database. Importantly, retain all underlying match
+        dates, goal counts, source attribution and original record IDs.
+        """
+        from .club_identity import club_id
+        changed = 0
+        updates = []
+        with self.connect() as con:
+            cursor = con.execute(
+                "SELECT record_id, competitor_id, payload FROM records "
+                "WHERE sport='Soccer' AND provider='openfootball' "
+                "AND entity_type='team'")
+            for record_id, previous, payload in cursor:
+                record = json.loads(payload)
+                code = str(record.get("competition_id") or "")
+                if not code:
+                    # Legacy downloaded items sometimes encode country/league
+                    # in their ID even when competition_id was omitted.
+                    pieces = str(previous).split(":")
+                    if len(pieces) >= 3:
+                        code = pieces[1]
+                if not code:
+                    continue
+                try:
+                    identity = club_id(record.get("competitor", ""), code)
+                except ValueError:
+                    continue
+                if previous == identity and record.get("team_id") == identity:
+                    continue
+                record["competitor_id"] = identity
+                record["team_id"] = identity
+                updates.append((identity, json.dumps(
+                    record, ensure_ascii=False, allow_nan=False), utc_now(), record_id))
+                if len(updates) >= 1000:
+                    con.executemany(
+                        "UPDATE records SET competitor_id=?, payload=?, updated=? "
+                        "WHERE record_id=?", updates)
+                    changed += len(updates)
+                    updates.clear()
+            if updates:
+                con.executemany(
+                    "UPDATE records SET competitor_id=?, payload=?, updated=? "
+                    "WHERE record_id=?", updates)
+                changed += len(updates)
+        return changed
+
     def seed_bundled(self):
         """Load *each* verified redistributable historical seed once.
 
@@ -315,10 +366,12 @@ class Archive:
                     seasons.add((row["provider"], row["sport"], str(row["season"])))
                     rows.append(row)
                     if len(rows) >= 1000:
-                        count += self.upsert(rows, overwrite=False)
+                        count += self.upsert(rows, overwrite=(
+                        seed.name.startswith("seed_soccer_cc0")))
                         rows = []
             if rows:
-                count += self.upsert(rows, overwrite=False)
+                count += self.upsert(rows, overwrite=(
+                    seed.name.startswith("seed_soccer_cc0")))
             for provider, sport, season in seasons:
                 # OpenFootball covers a selection of club leagues, NEVER all
                 # possible soccer competitions or individual players.
@@ -330,4 +383,7 @@ class Archive:
                     self.mark(provider, sport, season, "complete")
             self.set_setting(key, stamp)
             total += count
+        # Run for existing users too: a completed previous seed stamp must not
+        # prevent repairing legacy multi-league club identity fragments.
+        self.reconcile_openfootball_clubs()
         return total
