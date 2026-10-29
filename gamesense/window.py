@@ -33,7 +33,7 @@ QWidget { background:#0e1116; color:#e9edf3; font-family:'Segoe UI'; font-size:1
 QMainWindow { background:#0e1116; }
 QFrame#sidebar { background:#10151c; border-right:1px solid #242b34; }
 QLabel { background:transparent; }
-QLabel#brand { font-size:24px; font-weight:800; letter-spacing:2px; }
+QLabel#brand { font-size:21px; font-weight:800; letter-spacing:1px; }
 QLabel#muted { color:#96a2b3; }
 QLabel#eyebrow { color:ACCENT; font-size:10px; font-weight:700; letter-spacing:2px; }
 QLabel#heading { font-size:27px; font-weight:700; }
@@ -478,6 +478,10 @@ class GameSenseWindow(QMainWindow):
             content.addWidget(caption)
             chart = AnalyticsChart()
             chart.setMinimumHeight(290)
+            # Each dashboard tile is a clean read-only visual, with hover and
+            # point selection. The separate Deep Dive retains full pan/zoom/export
+            # tools, rather than repeating a toolbar in every mini-panel.
+            chart.toolbar.setVisible(False)
             chart.pointSelected.connect(self._open_identity)
             content.addWidget(chart)
             self.dash_visuals.append((caption, chart))
@@ -665,7 +669,7 @@ class GameSenseWindow(QMainWindow):
         self.provider_note = label('', 'muted', True)
         self.provider_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.provider_note)
-        free_player_card, free_player_layout = panel()
+        self.free_player_card, free_player_layout = panel()
         free_player_layout.addWidget(
             label('START WITH A REAL FOOTBALL LEGEND', 'section'))
         free_player_layout.addWidget(label(
@@ -676,7 +680,7 @@ class GameSenseWindow(QMainWindow):
         free_player_layout.addWidget(button(
             'GET REAL CRISTIANO RONALDO · WORLD CUP 2022',
             self._download_ronaldo_sample, True))
-        layout.addWidget(free_player_card)
+        layout.addWidget(self.free_player_card)
         # Optional authenticated football data: no key is bundled or saved.
         self.api_finder, api = panel()
         api.addWidget(label('GLOBAL FOOTBALL PLAYER FINDER', 'section'))
@@ -838,6 +842,8 @@ class GameSenseWindow(QMainWindow):
         accent = SPORT_STYLES[sport][0]
         self.setStyleSheet(BASE_STYLE.replace('ACCENT', accent))
         self.banner.set_sport(sport)
+        if hasattr(self, 'free_player_card'):
+            self.free_player_card.setVisible(sport == 'Soccer')
         seasons = self.archive.seasons(sport)
         if self.demo:
             from .demo import demo_data
