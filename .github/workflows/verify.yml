@@ -2,7 +2,7 @@ name: Verify preview desktop packages
 on:
   push:
     branches:
-      - feature/football-leagues-afl-stats-v08
+      - feature/real-club-profiles-v09
   pull_request:
     paths:
       - 'app.py'
@@ -66,9 +66,9 @@ jobs:
           path: output/**
           if-no-files-found: warn
 
-  publish-v07-preview:
+  publish-v09-preview:
     name: Publish separately versioned unsigned preview
-    if: github.ref == 'refs/heads/feature/football-leagues-afl-stats-v08'
+    if: github.ref == 'refs/heads/feature/real-club-profiles-v09'
     needs: [verify]
     runs-on: ubuntu-latest
     permissions:
@@ -84,7 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG=v0.8.0-beta.1
+          TAG=v0.9.0-beta.1
           test -s release-assets/GameSenseSetup-Windows.exe
           test -s release-assets/GameSense-macOS.dmg
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -102,5 +102,5 @@ jobs:
             release-assets/package-check-macOS.json \
             --target "$GITHUB_SHA" \
             --prerelease --latest=false \
-            --title "GameSense 0.8.0 (European leagues & AFL player stats beta)" \
+            --title "GameSense 0.9.0 (Cross-League Club Profiles & Real Results Beta)" \
             --notes-file docs/RELEASE_NOTES.md
