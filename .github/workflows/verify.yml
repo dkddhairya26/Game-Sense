@@ -63,3 +63,42 @@ jobs:
           name: GameSense-preview-${{ matrix.platform }}
           path: output/**
           if-no-files-found: warn
+
+  publish-v07-preview:
+    name: Publish separately versioned unsigned preview
+    if: github.ref == 'refs/heads/feature/real-history-and-multi-chart-dashboard'
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: GameSense-preview-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish only after two verified installers exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=v0.7.0-beta.1
+          test -s release-assets/GameSenseSetup-Windows.exe
+          test -s release-assets/GameSense-macOS.dmg
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Preview already published; refusing to overwrite signed or public artifacts."
+            exit 1
+          fi
+          gh release create "$TAG" \
+            release-assets/GameSenseSetup-Windows.exe \
+            release-assets/GameSense-macOS.dmg \
+            release-assets/SHA256SUMS-Windows.txt \
+            release-assets/SHA256SUMS-macOS.txt \
+            release-assets/build-report-Windows.json \
+            release-assets/build-report-macOS.json \
+            release-assets/package-check-Windows.json \
+            release-assets/package-check-macOS.json \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "GameSense 0.7.0 (historical data & visuals preview)" \
+            --notes-file docs/RELEASE_NOTES.md
