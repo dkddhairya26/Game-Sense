@@ -465,7 +465,6 @@ class GameSenseWindow(QMainWindow):
         self.dash_chart = AnalyticsChart()
         self.dash_metric, self.dash_mode = self._chart_controls(
             self.dash_chart, inner, self._plot_dashboard)
-        layout.addWidget(frame)
         self.dash_grid = QGridLayout()
         self.dash_grid.setHorizontalSpacing(14)
         self.dash_grid.setVerticalSpacing(14)
@@ -481,6 +480,8 @@ class GameSenseWindow(QMainWindow):
             self.dash_visuals.append((caption, chart))
             self.dash_grid.addWidget(card, index // 2, index % 2)
         layout.addLayout(self.dash_grid)
+        layout.addWidget(label('BUILD YOUR OWN COMPARISON', 'section'))
+        layout.addWidget(frame)
         self.featured = QHBoxLayout()
         layout.addWidget(label('FROM YOUR ARCHIVE', 'eyebrow'))
         layout.addLayout(self.featured)
