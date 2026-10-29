@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 
 from .archive import data_directory
 from .http import HttpClient
-from .providers import Provider, ProviderMeta, _base, _number
+from .provider_base import Provider, ProviderMeta, _base, _number
 
 
 def _id(value):
