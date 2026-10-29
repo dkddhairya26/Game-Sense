@@ -521,7 +521,14 @@ class StatsBombProvider(Provider):
                     archive.set_setting(marker,True)
 
 
-PROVIDERS={p.meta.id:p for p in [F1DBProvider(),NBAProvider(),StatsBombProvider(),SquiggleProvider(),JolpicaProvider()]}
+# Optional player-level sources extend coverage without altering the licensed
+# seed archive or pretending unavailable historical years have been fetched.
+from .extra_providers import NBAStatsHistoryProvider, APIFootballProvider
+
+PROVIDERS={p.meta.id:p for p in [
+    F1DBProvider(), NBAProvider(), NBAStatsHistoryProvider(),
+    StatsBombProvider(), APIFootballProvider(), SquiggleProvider(), JolpicaProvider()
+]}
 
 
 def bootstrap(archive):
