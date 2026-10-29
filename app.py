@@ -74,13 +74,64 @@ def main():
                         unhandled.append(
                             f'Historical football starter missing from local archive: '
                             f'expected >=7,500 real club rows, found {real_club_rows:,}.')
+                # Reproduce the real user bug: EPL 2025-26 showed
+                # "Aston Villa / no observed data" despite stored club scores,
+                # because team aliases and league-specific IDs diverged.
+                club_checks = []
+                if cc0_seed.exists():
+                    try:
+                        from gamesense.club_identity import club_id
+                        from gamesense.team_analytics import club_summary
+                        cid = club_id('Aston Villa FC','en.1')
+                        window.sport.setCurrentText('Soccer')
+                        window.season.setCurrentText('2025-26')
+                        window.competition_filter.setCurrentText(
+                            'English Premier League')
+                        window.search.setText('Aston Villa')
+                        window._update_identities()
+                        index = window.athlete.findData(cid)
+                        if index < 0:
+                            raise AssertionError(
+                                'Aston Villa is missing from the 2025-26 EPL picker.')
+                        window.athlete.setCurrentIndex(index)
+                        window.navigate('profiles')
+                        window.profile_mode.setCurrentText('Season trend')
+                        window._load_profile()
+                        history = window.profile_frame
+                        if history.empty or history['competition'].nunique()<2:
+                            raise AssertionError(
+                                'Aston Villa career must include both the '
+                                'English Premier League and EFL Championship.')
+                        if not {'2018-19','2025-26'}.issubset(
+                                set(history['season'].astype(str))):
+                            raise AssertionError('Aston Villa season history is fragmented.')
+                        if club_summary(history,'Soccer')['matches']<20:
+                            raise AssertionError('Club profile lacks actual match statistics.')
+                        if window.profile_match_table.model().rowCount()<20:
+                            raise AssertionError('Match results tab is empty.')
+                        if window.history_table.model().rowCount()<2:
+                            raise AssertionError('League-season standings tab is empty.')
+                        if window.profile_chart.plotted_data.empty:
+                            raise AssertionError('Club season evolution chart is empty.')
+                        if args.screenshots:
+                            check_path = args.screenshots/'aston-villa-real-club-profile.png'
+                            if not window.grab().save(str(check_path)):
+                                raise AssertionError('Club profile screenshot could not be saved.')
+                        club_checks.append({
+                            'name':'Aston Villa across EPL + Championship',
+                            'success':True,'matches':len(history),
+                            'competitions':sorted(set(history['competition'])),
+                            'seasons':sorted(set(history['season'].astype(str)))})
+                    except Exception:
+                        club_checks.append({'name':'Aston Villa club regression',
+                                            'success':False,'error':traceback.format_exc()})
                 search_checks = []
                 examples = {'Soccer':('statsbomb:5503','Lionel Messi'), 'NBA':('nba:2544','LeBron James'), 'AFL':('squiggle:team:4','Collingwood'), 'F1':('f1db:lewis-hamilton','Lewis Hamilton')}
                 for sport, (identity, query) in examples.items():
                     if window.archive.count(sport, competitor_id=identity):
                         matches = window.archive.search(sport, query)
                         search_checks.append({'query':query,'success':identity in matches['competitor_id'].tolist()})
-                report = {'success': all(r['success'] for r in results + search_checks) and not unhandled, 'search_checks':search_checks, 'unhandled_errors': unhandled, 'native_qt': True, 'offline': True, 'screens': results,
+                report = {'success': all(r['success'] for r in results + search_checks + club_checks) and not unhandled, 'search_checks':search_checks, 'club_checks':club_checks, 'unhandled_errors': unhandled, 'native_qt': True, 'offline': True, 'screens': results,
                           'coverage': {s:window.archive.stats(s) for s in ('Soccer','NBA','AFL','F1')}}
                 report_path.write_text(json.dumps(report, indent=2), encoding='utf-8')
                 app.exit(0 if report['success'] else 1)
