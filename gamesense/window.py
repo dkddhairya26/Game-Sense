@@ -681,6 +681,37 @@ class GameSenseWindow(QMainWindow):
             'GET REAL CRISTIANO RONALDO · WORLD CUP 2022',
             self._download_ronaldo_sample, True))
         layout.addWidget(self.free_player_card)
+        # Freely reusable CC0 European domestic club history, requiring no key.
+        self.free_leagues_card, cc0 = panel()
+        cc0.addWidget(label('ALL THE CLUBS · MORE REAL EUROPEAN LEAGUES', 'section'))
+        cc0.addWidget(label(
+            'Premier League, La Liga, Bundesliga, Serie A, Ligue 1, '
+            'Eredivisie, Primeira Liga and selected lower divisions. '
+            'OpenFootball CC0 supplies actual club match scores from multiple '
+            'historical seasons, with no account required. These are CLUB '
+            'records, not player goals/assists. Current seasons depend on '
+            'the upstream files being published.',
+            'muted', True))
+        cc0.addWidget(button(
+            'DOWNLOAD HISTORICAL EUROPEAN CLUB RESULTS (NO API KEY)',
+            self._download_free_club_results, True))
+        layout.addWidget(self.free_leagues_card)
+        # Optional individual AFL player box scores, distinct from Squiggle
+        # team fixtures. This is user-initiated third-party research data only.
+        self.afl_research_card, afr = panel()
+        afr.addWidget(label('ACTUAL AFL PLAYER STATISTICS · OPT IN', 'section'))
+        afr.addWidget(label(
+            'Research archive contains recorded player-game kicks, disposals, '
+            'handballs, marks, goals, tackles, clearances and more across '
+            'historical VFL/AFL seasons. The publisher uses MIT for its '
+            'project but cites AFL Tables as the original statistical source. '
+            'Its underlying data redistribution rights require independent '
+            'verification. Large personal/local download; NOT bundled.',
+            'muted', True))
+        afr.addWidget(button(
+            'IMPORT HISTORICAL AFL PLAYER BOX SCORES',
+            self._download_afl_player_archive, True))
+        layout.addWidget(self.afl_research_card)
         # Optional authenticated football data: no key is bundled or saved.
         self.api_finder, api = panel()
         api.addWidget(label('GLOBAL FOOTBALL PLAYER FINDER', 'section'))
@@ -810,7 +841,10 @@ class GameSenseWindow(QMainWindow):
     def _dashboard_history_action(self):
         sport = self.sport_name
         if sport == 'Soccer':
-            self._download_ronaldo_sample()
+            self._download_free_club_results()
+            return
+        if sport == 'AFL':
+            self._download_afl_player_archive()
             return
         self.navigate('downloads')
         provider = {'NBA':'nba_stats', 'AFL':'squiggle', 'F1':'f1db'}.get(sport)
@@ -959,7 +993,7 @@ class GameSenseWindow(QMainWindow):
                     + scope + '\nCharts show up to 10,000 selected records; '
                     'filter a season for a complete local cohort.')
                 self.history_action.setText(
-                    'GET REAL CRISTIANO RONALDO · 2022 WORLD CUP'
+                    'GET MORE FOOTBALL CLUB HISTORY & PLAYER SOURCES'
                     if sport=='Soccer' else
                     'EXPLORE HISTORICAL NBA PLAYERS (1946–PRESENT)'
                     if sport=='NBA' else
@@ -1280,6 +1314,8 @@ class GameSenseWindow(QMainWindow):
         self.provider_note.setText(self._provider_description(provider))
         football_mode = self.provider.currentData() == 'api_football'
         self.api_finder.setVisible(football_mode)
+        self.free_leagues_card.setVisible(self.sport_name == 'Soccer')
+        self.afl_research_card.setVisible(self.sport_name == 'AFL')
         for widget in (self.download_all, self.download_range, self.download_latest):
             widget.setVisible(not football_mode)
         self.download_seasons = []
@@ -1290,6 +1326,56 @@ class GameSenseWindow(QMainWindow):
             self.competition.clear()
             self.competition.setVisible(hasattr(provider, 'competitions'))
             self.competition_button.setVisible(hasattr(provider, 'competitions'))
+
+    def _download_free_club_results(self):
+        if self.download_running or not self._online():
+            return
+        reply=QMessageBox.question(
+            self, 'Add real football league seasons',
+            'Build a REAL local club match library across the Premier League, '
+            'La Liga, Bundesliga, Serie A, Ligue 1, Eredivisie and Primeira Liga?\n\n'
+            'The application already includes CC0 starter seasons in new '
+            'installers. This option requests older and newly available '
+            'seasons from the free upstream source. It does not contain '
+            'individual player identities, scorers or assists.\n\n'
+            'The update can make many small network requests. You may '
+            'cancel; completed year files remain cached.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.navigate('downloads')
+        self.sport.setCurrentText('Soccer')
+        index=self.provider.findData('openfootball')
+        if index>=0:
+            self.provider.setCurrentIndex(index)
+        self._start_download('all')
+
+    def _download_afl_player_archive(self):
+        if self.download_running or not self._online():
+            return
+        reply=QMessageBox.question(
+            self, 'Historical AFL player-game data — permissions',
+            'This downloads a potentially LARGE third-party research archive '
+            '(tens of MB compressed, substantially larger once imported).\n\n'
+            'The original box scores came from AFL Tables. The research '
+            'repository is marked MIT, but that does not automatically '
+            'establish independent rights over its source statistics.\n\n'
+            'Proceed for local personal study only, understanding that '
+            'you must verify rights before publishing, repackaging or '
+            'commercially redistributing the player records?\n\n'
+            'Recorded per-game fields may be missing in historical eras; '
+            'GameSense will not invent them.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self.navigate('downloads')
+        self.sport.setCurrentText('AFL')
+        index=self.provider.findData('afl_player_research')
+        if index>=0:
+            self.provider.setCurrentIndex(index)
+        self._start_download('all')
 
     def _download_ronaldo_sample(self):
         if self.download_running or not self._online():
