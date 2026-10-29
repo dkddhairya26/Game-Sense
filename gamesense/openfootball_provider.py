@@ -18,6 +18,7 @@ import threading
 from .archive import data_directory
 from .http import Cancelled, HttpClient
 from .provider_base import Provider, ProviderMeta, _base, _client
+from .club_identity import club_id
 
 REPO = "https://raw.githubusercontent.com/openfootball/football.json/master"
 CATALOGUE = "https://api.github.com/repos/openfootball/football.json/contents"
@@ -81,10 +82,10 @@ def fixture_records(payload, season: str, code: str, today: date | None = None):
             ("home", home, away, h, a, "home"),
             ("away", away, home, a, h, "away"),
         ):
-            team_key = re.sub(r"[^a-z0-9]+", "-", team.casefold()).strip("-")
-            # League-scoped team identifiers avoid false player/club matches.
-            # If a team changes its name, it may require reconciliation later.
-            identity = f"openfootball:{code}:{team_key}"
+            # Country-scoped canonical club IDs carry a real team through
+            # divisions and minor source naming changes (Aston Villa / FC).
+            # Never merge individual players with clubs.
+            identity = club_id(team, code)
             rows.append(_base(
                 meta, season,
                 record_id=(f"openfootball:{code}:{season}:{iso_date}:" 
