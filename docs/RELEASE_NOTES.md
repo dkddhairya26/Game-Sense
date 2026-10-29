@@ -1,7 +1,45 @@
-GameSense 0.6.0 is a native desktop preview with searchable real records, athlete/team profiles, cached licensed portraits, comparisons and interactive sport statistics.
+# GameSense 0.7.0 — Real History & Visual Analytics Preview
 
-The permitted bundled archive contains 27,687 F1 race-result rows across 1950–2026 and 2,673 NBA player-season rows across 2022–23 to 2026–27, with source manifests and CC BY 4.0 credit. Football event downloads remain local under StatsBomb's research terms. AFL downloads provide team results; AFL player history and complete all-era NBA careers are not included. Missing measurements and telemetry are never invented.
+This is a new native Windows/macOS **preview**, not a claim of universal
+historical sports coverage. Only tested release assets should be published.
 
-Downloads: `GameSenseSetup-Windows.exe` and `GameSense-macOS.dmg`. Verify the accompanying SHA256SUMS files. The release workflow publishes only after both operating systems pass automated tests, native screen rendering, packaging and installed/mounted startup checks; actual platform reports accompany the assets. The development suite at the preview snapshot passed 76 tests plus 26 subtests, with 20 native screen cases. Those results do not establish complete provider coverage.
+## What's new
 
-This is an unsigned preview; the Mac app is not Developer ID signed or notarised. Manual interactive installation on clean end-user machines has not been verified. Existing v0.4/v0.5 releases are preserved, and this prerelease is not made the repository's latest stable release.
+- Six simultaneous, distinct sport-specific visualisations on every dashboard,
+  plus an independent customizable deep-dive plot with hover/export features.
+- Official NBA Stats optional on-demand connector, capable of requesting
+  1946–47 onward historical player-season averages when NBA.com permits the
+  network request. This does **not** add older seasons to the bundled database.
+- API-Football (API-Sports) authenticated, user-key-only integration for
+  competition player statistics, ID-verified player searching, and available
+  player-season history. Account pricing, years and league coverage depend
+  on provider terms. Player photos are not republished from the provider.
+- Free, direct Cristiano Ronaldo **Portugal 2022 World Cup** event-data action
+  from StatsBomb Open Data. This provides real recorded match events, not a
+  complete Manchester United / Madrid / Juventus / Al Nassr career.
+- Direct historical-data discovery actions on sport dashboards; improved
+  explicit unavailable-data states and real source attribution.
+- Additional provider regression fixtures, verification for Windows/macOS
+  packaging, and privacy-conscious handling of API keys.
+
+## What is not solved
+
+- The bundled source archive retains its genuinely available data: F1DB race
+  records from 1950 to provider release; BoxScore Lab NBA player seasons
+  from 2022–23 onward. Those older NBA and Ronaldo club seasons must be
+  requested and actually returned by an approved provider.
+- No guaranteed data for all NBA seasons back to 1946 if NBA.com rejects
+  requests. No complete historical player records for every football league.
+- AFL historical downloads remain club-match results only: full athlete
+  statistics need a correctly licensed AFL provider or user import.
+- No invented event coordinates, shots, telemetry, stats or photographs.
+- These packages are unsigned preview builds. Manual clean-machine
+  Windows/macOS installation and API accounts still require user verification.
+
+**Do not confuse mocked provider unit tests with successful real API access.**
+See docs/HISTORY_V07.md for the specific connectors, terms, verification
+checklist, and explicit data source limitations.
+
+The new preview is published only after both platforms build and pass the
+automated native application/package startup checks; those checks cannot
+guarantee the remote sports data providers are accessible from a user's IP.
