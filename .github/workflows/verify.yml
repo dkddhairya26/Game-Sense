@@ -2,7 +2,7 @@ name: Verify preview desktop packages
 on:
   push:
     branches:
-      - feature/real-history-and-multi-chart-dashboard
+      - feature/football-leagues-afl-stats-v08
   pull_request:
     paths:
       - 'app.py'
@@ -40,6 +40,8 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: python -m pip install -r requirements.txt pytest
+      - name: Assemble verified CC0 European league starter records
+        run: python scripts/build_football_seed.py
       - name: Check analytics, providers, portraits and chart rendering
         env:
           QT_QPA_PLATFORM: offscreen
@@ -66,7 +68,7 @@ jobs:
 
   publish-v07-preview:
     name: Publish separately versioned unsigned preview
-    if: github.ref == 'refs/heads/feature/real-history-and-multi-chart-dashboard'
+    if: github.ref == 'refs/heads/feature/football-leagues-afl-stats-v08'
     needs: [verify]
     runs-on: ubuntu-latest
     permissions:
@@ -82,7 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG=v0.7.0-beta.1
+          TAG=v0.8.0-beta.1
           test -s release-assets/GameSenseSetup-Windows.exe
           test -s release-assets/GameSense-macOS.dmg
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -100,5 +102,5 @@ jobs:
             release-assets/package-check-macOS.json \
             --target "$GITHUB_SHA" \
             --prerelease --latest=false \
-            --title "GameSense 0.7.0 (historical data & visuals preview)" \
+            --title "GameSense 0.8.0 (European leagues & AFL player stats beta)" \
             --notes-file docs/RELEASE_NOTES.md
