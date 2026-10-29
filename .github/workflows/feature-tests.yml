@@ -2,7 +2,7 @@ name: Validate historical connectors and premium dashboards
 on:
   push:
     branches:
-      - feature/football-leagues-afl-stats-v08
+      - feature/real-club-profiles-v09
   workflow_dispatch:
 permissions:
   contents: read
