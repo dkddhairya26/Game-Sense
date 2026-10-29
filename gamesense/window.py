@@ -454,11 +454,33 @@ class GameSenseWindow(QMainWindow):
             self.stat_values.append(value)
             cards.addWidget(frame)
         layout.addLayout(cards)
+        # A real analytics dashboard needs simultaneous, different explanations of
+        # the data — not a single chart with nineteen options in a dropdown.
+        layout.addWidget(label('THE ANALYTICS STUDIO', 'section'))
+        layout.addWidget(label(
+            'Six independent interactive charts. Every panel is generated from recorded '
+            'statistics; unavailable data stays visibly unavailable.', 'muted', True))
         frame, inner = panel()
-        inner.addWidget(label('Performance, in perspective', 'section'))
+        inner.addWidget(label('YOUR DEEP DIVE', 'eyebrow'))
         self.dash_chart = AnalyticsChart()
-        self.dash_metric, self.dash_mode = self._chart_controls(self.dash_chart, inner, self._plot_dashboard)
+        self.dash_metric, self.dash_mode = self._chart_controls(
+            self.dash_chart, inner, self._plot_dashboard)
         layout.addWidget(frame)
+        self.dash_grid = QGridLayout()
+        self.dash_grid.setHorizontalSpacing(14)
+        self.dash_grid.setVerticalSpacing(14)
+        self.dash_visuals = []
+        for index in range(6):
+            card, content = panel()
+            caption = label('SPORT INTELLIGENCE', 'eyebrow')
+            content.addWidget(caption)
+            chart = AnalyticsChart()
+            chart.setMinimumHeight(290)
+            chart.pointSelected.connect(self._open_identity)
+            content.addWidget(chart)
+            self.dash_visuals.append((caption, chart))
+            self.dash_grid.addWidget(card, index // 2, index % 2)
+        layout.addLayout(self.dash_grid)
         self.featured = QHBoxLayout()
         layout.addWidget(label('FROM YOUR ARCHIVE', 'eyebrow'))
         layout.addLayout(self.featured)
@@ -886,7 +908,60 @@ class GameSenseWindow(QMainWindow):
         combo.blockSignals(False)
 
     def _plot_dashboard(self, *_):
-        self.dash_chart.plot(self.frame, self.sport_name, metric=self.dash_metric.currentText() or None, mode=self.dash_mode.currentText())
+        frame = getattr(self, 'frame', pd.DataFrame())
+        sport = self.sport_name
+        self.dash_chart.plot(
+            frame, sport, metric=self.dash_metric.currentText() or None,
+            mode=self.dash_mode.currentText())
+        if not hasattr(self, 'dash_visuals'):
+            return
+        # Each sporting discipline has a distinct analytical story. The chart
+        # engine displays an explicit missing-data state for unsupported modes.
+        layouts = {
+            'Soccer': [
+                ('GOALS ACROSS SEASONS', 'Season trend', 'goals'),
+                ('GOALSCORING LEADERS', 'Ranking', 'goals'),
+                ('SHOT MAP / VERIFIED COORDINATES', 'Shot map', 'shots'),
+                ('ATTACKING EFFICIENCY', 'Scatter', 'shots'),
+                ('CHANCE DISTRIBUTION', 'Distribution', 'goals'),
+                ('PLAYER PROFILE COMPARISON', 'Radar', 'goals')],
+            'NBA': [
+                ('SCORING THROUGH THE YEARS', 'Season trend', 'points'),
+                ('SCORING LEADERS', 'Ranking', 'points'),
+                ('POINTS DISTRIBUTION', 'Distribution', 'points'),
+                ('MULTI-STAT PLAYER PROFILE', 'Radar', 'points'),
+                ('SCORING VS PLAYMAKING', 'Scatter', 'assists'),
+                ('SCORING CONSISTENCY', 'Box plot', 'points')],
+            'AFL': [
+                ('BALL-WINNING EVOLUTION', 'Season trend', 'disposals'),
+                ('DISPOSALS LEADERS', 'Ranking', 'disposals'),
+                ('GOAL DISTRIBUTION', 'Distribution', 'goals'),
+                ('PLAYER STAT PROFILE', 'Radar', 'disposals'),
+                ('TACKLES VS POSSESSIONS', 'Scatter', 'tackles'),
+                ('CONTESTED CONSISTENCY', 'Box plot', 'marks')],
+            'F1': [
+                ('CHAMPIONSHIP PROGRESSION', 'Season trend', 'points'),
+                ('POINTS LEADERS', 'Ranking', 'points'),
+                ('QUALIFYING VS RACE', 'Grid vs finish', 'grid_position'),
+                ('FINISHING POSITION SPREAD', 'Distribution', 'finish_position'),
+                ('DRIVER STRENGTHS', 'Radar', 'points'),
+                ('CHAMPIONSHIP EVOLUTION', 'Championship evolution', 'championship_points')],
+        }
+        metrics = available_metrics(frame) if isinstance(frame, pd.DataFrame) else []
+        for (caption, chart), (heading, mode, preferred) in zip(
+                self.dash_visuals, layouts[sport]):
+            caption.setText(heading)
+            # Do not quietly plot a different metric on a chart whose heading
+            # promises something specific: say the source doesn't have it.
+            if preferred not in metrics and mode not in (
+                    'Shot map', 'Grid vs finish', 'Championship evolution'):
+                chart.plot(pd.DataFrame(), sport, mode=mode)
+                chart.explanation.setText(
+                    f'{preferred.replace("_", " ").title()} is not provided by '
+                    'the selected source. Load suitable real player statistics.')
+            else:
+                chart.plot(frame, sport, metric=preferred if preferred in metrics
+                           else (metrics[0] if metrics else None), mode=mode)
 
     def _clear_layout(self, layout):
         while layout.count():
