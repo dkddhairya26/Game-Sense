@@ -4,6 +4,34 @@ Native desktop sports analytics for **football/soccer, NBA, AFL and Formula 1**.
 
 Version **[0.6.0-beta.1](https://github.com/dkddhairya26/Game-Sense/releases/tag/v0.6.0-beta.1)** is a published preview, built from commit `920f3af` after native Windows and macOS checks passed. Earlier releases are preserved. Coverage is determined by the selected provider and records actually downloaded; it does **not** include every athlete, metric or historical event across all four sports. AFL team results remain labelled as team results. Missing measurements and unavailable telemetry are not fabricated. Fictional records are confined to an explicitly labelled demonstration mode.
 
+## GameSense v0.8 — historic European clubs and AFL athlete stats
+
+The v0.8 development branch addresses reports that Football showed only
+35 World Cup records and AFL showed six mostly empty graphs:
+
+- A CC0 **real team/match** starter archive is generated during installer
+  packaging. It contains completed Premier League, La Liga, Bundesliga,
+  Serie A, Ligue 1, Eredivisie and Primeira Liga fixtures from **published
+  2015–16 through 2025–26 files** (league-year availability varies). The
+  installer build **fails** if at least 7,500 team rows spanning five seasons
+  and five leagues cannot be sourced. Additional league histories are
+  available in the Data Manager via the new OpenFootball source. These
+  records contain **clubs and scores**, NOT individual player records.
+- AFL team scores from Squiggle are now shown correctly as scoring charts:
+  goals, behinds, points for/against, goal margins, wins, and season trends.
+- User-initiated AFL player-game history is optionally retrievable from the
+  public [AFL Data Analysis research project](https://github.com/akareen/AFL-Data-Analysis)
+  with provenance and a permissions warning. The dataset was assembled from
+  AFL Tables and its original data rights are not independently verified for
+  redistribution; GameSense does **not** bundle it.
+- The optional authenticated API-Football integration remains necessary for
+  broader club-level footballer careers (for example Cristiano Ronaldo).
+  OpenFootball team scores cannot substitute for Ronaldo's player goals.
+
+**No provider guarantees every league, every player, every season or every
+statistic.** Missing historic measurements remain missing. See
+[the v0.8 release notes](docs/RELEASE_NOTES.md) for the precise coverage.
+
 | Sport/source | Implemented scope | Material limit |
 | --- | --- | --- |
 | F1 / F1DB | Published race-result history from 1950, joined available qualifying, fastest laps, standings and pit stops; CC BY 4.0 | Race records are not a complete telemetry archive. Latest source release/seed details are in `data/SOURCE_MANIFEST.json`. |
