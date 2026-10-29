@@ -4,6 +4,8 @@ Design: raw records are cleaned once, then all UI views reuse the same calculati
 The scoring formulas are illustrative indicators, not official sport rankings.
 """
 from __future__ import annotations
+import json
+import numpy as np
 import pandas as pd
 
 SPORTS = {
@@ -23,94 +25,52 @@ def clean_data(df: pd.DataFrame, sport: str) -> tuple[pd.DataFrame, dict]:
     if missing:
         raise ValueError('Missing required columns: ' + ', '.join(missing))
     original = len(df)
-    df = df.drop_duplicates()
+    # Event exports can contain genuine shot/pit-stop arrays. Build comparison
+    # keys without discarding those nested observations from the stored rows.
+    keys = df.copy()
+    for column in keys.select_dtypes(include=['object']).columns:
+        keys[column] = keys[column].map(lambda value: json.dumps(value, sort_keys=True, default=str) if isinstance(value, (list, dict)) else value)
+    df = df.loc[~keys.duplicated()].copy()
     duplicates = original - len(df)
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df['date'] = pd.to_datetime(df['date'], errors='coerce', utc=True, format='mixed').dt.tz_localize(None)
     df['season'] = df['season'].astype('string').str.strip()
     df['competitor'] = df['competitor'].astype('string').str.strip()
     df['team'] = df['team'].astype('string').str.strip()
-    invalid = df['date'].isna() | df['season'].isna() | df['competitor'].isna() | (df['competitor'] == '')
+    invalid = df['date'].isna() | df['season'].isna() | df['season'].eq('') | df['competitor'].isna() | (df['competitor'] == '')
     removed = int(invalid.sum())
     df = df.loc[~invalid].copy()
     for metric in SPORTS[sport]['metrics']:
         if metric not in df.columns:
             df[metric] = float('nan')  # Missing is NOT zero.
-        df[metric] = pd.to_numeric(df[metric], errors='coerce')
-    # Preserve all supplied extra statistics. Convert numeric-looking fields while
-    # leaving names, IDs, competition labels and unknown categories untouched.
-    # This makes historical imports useful beyond the five default sport metrics.
-    protected = set(REQUIRED) | {"record_type", "event", "opponent", "status",
-                                  "position", "driver_id", "player_id", "team_id",
-                                  "source", "competition"}
-    for col in df.columns:
-        if col in protected or col.endswith("_id") or col in SPORTS[sport]["metrics"]:
-            continue
-        if pd.api.types.is_numeric_dtype(df[col]):
-            continue
-        nonempty = df[col].notna().sum()
-        if not nonempty:
-            continue
-        values = pd.to_numeric(df[col], errors="coerce")
-        if values.notna().sum() / nonempty >= .95:
-            df[col] = values
-    # A rating is only computed when at least one rating component is present.
+        df[metric] = pd.to_numeric(df[metric], errors='coerce').replace([np.inf, -np.inf], np.nan)
+    # Partial scores are incomparable: require every component in the formula.
     weights = SPORTS[sport]['weights']
-    present = df[list(weights)].notna()
-    df['rating'] = sum(df[k].fillna(0) * w for k, w in weights.items())
-    df.loc[~present.any(axis=1), 'rating'] = float('nan')
-    # Imported OpenLigaDB rows describe club MATCHES, not individual athletes.
-    # Use a separately documented team-form formula rather than a player rating.
-    if sport == "Soccer" and "record_type" in df and {"wins", "draws", "goal_difference"} <= set(df.columns):
-        clubs = df["record_type"].eq("team match").fillna(False)
-        for column in ("wins","draws","goal_difference"):
-            df[column] = pd.to_numeric(df[column], errors="coerce")
-        df.loc[clubs, "rating"] = (
-            4 * df.loc[clubs, "wins"].fillna(0)
-            + 2 * df.loc[clubs, "draws"].fillna(0)
-            + df.loc[clubs, "goals"].fillna(0)
-            + .6 * df.loc[clubs, "goal_difference"].fillna(0)
-        )
-    # AFL match scores are not athlete-level disposals or marks.
-    if sport == "AFL" and "record_type" in df and {"wins", "draws", "margin"} <= set(df.columns):
-        clubs = df["record_type"].eq("team match").fillna(False)
-        for col in ("wins", "draws", "margin"):
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        df.loc[clubs, "rating"] = (
-            4 * df.loc[clubs, "wins"].fillna(0)
-            + 2 * df.loc[clubs, "draws"].fillna(0)
-            + .08 * df.loc[clubs, "margin"].fillna(0)
-        )
+    df['rating'] = sum(df[k] * w for k, w in weights.items())
     df = df.sort_values('date').reset_index(drop=True)
     return df, {'input_rows': original, 'duplicates_removed': duplicates, 'invalid_rows_removed': removed, 'valid_rows': len(df)}
 
 def rankings(df: pd.DataFrame, sport: str) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame(columns=['competitor', 'team', 'appearances', 'average_rating', *SPORTS[sport]['metrics']])
-    # NBA Stats returns one row per player per season (per-game averages).
-    # When multiple seasons are combined, weight each per-game average by
-    # games played; counting rows as games would be seriously misleading.
-    if (sport == "NBA" and "games" in df and "record_type" in df
-            and df["record_type"].astype(str).str.contains("season",case=False).all()):
-        out_rows = []
-        for player, group in df.groupby("competitor",dropna=True):
-            group=group.sort_values("date")
-            games=pd.to_numeric(group["games"],errors="coerce").clip(lower=0)
-            entry={"competitor": player,
-                   "team": group["team"].iloc[-1],
-                   "appearances": int(games.sum())}
-            for metric in ["rating", *SPORTS[sport]["metrics"]]:
-                values=pd.to_numeric(group[metric],errors="coerce")
-                usable=values.notna() & games.notna() & (games>0)
-                weight=games[usable].sum()
-                entry["average_rating" if metric=="rating" else metric]=(
-                    float((values[usable]*games[usable]).sum()/weight) if weight>0 else float("nan")
-                )
-            out_rows.append(entry)
-        return pd.DataFrame(out_rows).sort_values("average_rating",ascending=False,na_position="last")
-    agg = {'team': 'last', 'date': 'count', 'rating': 'mean'}
-    agg.update({metric: 'mean' for metric in SPORTS[sport]['metrics']})
-    out = df.groupby('competitor', dropna=True).agg(agg).reset_index()
-    return out.rename(columns={'date': 'appearances', 'rating': 'average_rating'}).sort_values('average_rating', ascending=False, na_position='last')
+    key = 'competitor_id' if 'competitor_id' in df else 'competitor'
+    rows = []
+    for identity, group in df.groupby(key, dropna=True):
+        latest = group.sort_values('date').iloc[-1]
+        kinds = group.get('record_type', group.get('record_kind', pd.Series('event', index=group.index))).fillna('').astype(str)
+        season = kinds.str.contains('season|career', case=False, regex=True)
+        games = pd.to_numeric(group.get('games', group.get('games_played', pd.Series(np.nan,index=group.index))), errors='coerce').where(season, 1)
+        count = int(games.sum()) if games.notna().all() else None
+        rating = float(group['rating'].mean()) if group['rating'].notna().any() else np.nan
+        if kinds.str.contains(r'per.?game|average', case=False, regex=True).all():
+            rating = weighted_average(group['rating'], games)
+        row = {'competitor':latest['competitor'], 'team':latest['team'], 'appearances':count, 'average_rating':rating}
+        if key == 'competitor_id':
+            row[key] = identity
+        for metric in SPORTS[sport]['metrics']:
+            stats = metric_summary(group, metric)
+            row[metric] = stats['per_game'] if stats['per_game'] is not None else stats['average']
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values('average_rating', ascending=False, na_position='last')
 
 def recent_form(df: pd.DataFrame, competitor: str, n: int = 5) -> float | None:
     values = df.loc[df['competitor'] == competitor].sort_values('date')['rating'].dropna().tail(n)
@@ -118,3 +78,100 @@ def recent_form(df: pd.DataFrame, competitor: str, n: int = 5) -> float | None:
 
 def summary(df: pd.DataFrame, sport: str) -> dict:
     return {'records': len(df), 'competitors': int(df['competitor'].nunique()), 'teams': int(df['team'].nunique()), 'seasons': int(df['season'].nunique()), 'average_rating': round(float(df['rating'].mean()), 2) if df['rating'].notna().any() else None}
+
+
+NON_TOTAL = {'finish_position', 'grid_position', 'position', 'round', 'rating', 'age', 'rank', 'number', 'fastest_lap', 'lap_time', 'speed', 'x', 'y', 'shot_x', 'shot_y', 'latitude', 'longitude'}
+
+
+def is_rate(metric: str) -> bool:
+    return (metric in NON_TOTAL or metric.endswith(('_pg', '_per_90', '_per_36', '_ms', '_position', '_number'))
+            or metric in {'championship_points', 'usage_rate', 'net_rating', 'positions_gained', 'fastest_lap_number', 'classified_position'}
+            or any(token in metric for token in ('percentage', '_pct', 'accuracy', 'efficiency', 'per_game', 'average', 'percentile')))
+
+
+def lower_is_better(metric: str) -> bool:
+    return metric.endswith(('_position', '_time_ms')) or metric in {'position', 'q1_ms', 'q2_ms', 'q3_ms', 'lap_time', 'turnovers', 'fouls', 'yellow_cards', 'red_cards', 'race_time_ms'}
+
+
+def weighted_average(values, weights) -> float | None:
+    values, weights = pd.Series(values, dtype=float), pd.Series(weights, dtype=float)
+    valid = values.notna() & weights.notna() & (weights > 0) & np.isfinite(values) & np.isfinite(weights)
+    return float(np.average(values[valid], weights=weights[valid])) if valid.any() else None
+
+
+def metric_summary(df: pd.DataFrame, metric: str) -> dict:
+    """Do not count one season-total row as one game, or add percentages."""
+    values = pd.to_numeric(df.get(metric, pd.Series(dtype=float)), errors='coerce').replace([np.inf, -np.inf], np.nan)
+    valid = values.dropna()
+    if valid.empty:
+        return {'total': None, 'average': None, 'best': None, 'count': 0, 'per_game': None}
+    per_game = None
+    total = None if is_rate(metric) else float(valid.sum())
+    average = float(valid.mean())
+    if not is_rate(metric):
+        kinds = df.get('record_type', df.get('record_kind', pd.Series('event', index=df.index))).fillna('event').astype(str)
+        if 'record_kind' in df:
+            kinds = kinds + ' ' + df['record_kind'].fillna('').astype(str)
+        season_rows = kinds.str.contains('season|career', case=False, regex=True)
+        average_rows = season_rows & kinds.str.contains(r'per.?game|average', case=False, regex=True)
+        games = pd.to_numeric(df.get('games', df.get('games_played', pd.Series(np.nan, index=df.index))), errors='coerce')
+        if average_rows.any():
+            # Earlier GameSense archives contained PPG, whereas the new provider
+            # supplies season totals. Explicit record grain preserves both.
+            needed = average_rows & values.notna()
+            if games[needed].notna().all() and (games[needed] > 0).all():
+                contributions = values.where(~average_rows, values * games)
+                total = float(contributions.sum(min_count=1))
+                if average_rows[values.notna()].all():
+                    average = weighted_average(values, games)
+            else:
+                total = None
+        denominators = games.where(season_rows, 1).where(values.notna())
+        if total is not None and denominators[values.notna()].notna().all() and (denominators[values.notna()] > 0).all() and denominators.sum() > 0:
+            per_game = float(total / denominators.sum())
+    if metric.endswith('_pg') or 'per_game' in metric:
+        weights = pd.to_numeric(df.get('games', df.get('games_played', pd.Series(np.nan, index=df.index))), errors='coerce')
+        weighted = weighted_average(values, weights)
+        if weighted is not None:
+            average = weighted
+    # Career percentages use the source's actual attempt counts. An unweighted
+    # mean of 1/1 and 0/9 would incorrectly report 50% instead of 10%.
+    shooting = {'field_goal_pct':('field_goals_made','field_goal_attempts'),
+                'three_point_pct':('three_point_makes','three_point_attempts'),
+                'free_throw_pct':('free_throws_made','free_throw_attempts'),
+                'pass_accuracy':('passes_completed','passes')}
+    if metric in shooting:
+        made_key, attempts_key = shooting[metric]
+        if made_key in df and attempts_key in df:
+            made = pd.to_numeric(df[made_key], errors='coerce')
+            attempts = pd.to_numeric(df[attempts_key], errors='coerce')
+            eligible = values.notna()
+            if made[eligible].notna().all() and attempts[eligible].notna().all() and attempts[eligible].sum() > 0:
+                average = float(made[eligible].sum()/attempts[eligible].sum())
+    return {'total': total, 'average': average, 'best': float(valid.min() if lower_is_better(metric) else valid.max()), 'count': len(valid), 'per_game': per_game}
+
+
+def season_history(df: pd.DataFrame, metrics: list[str]) -> pd.DataFrame:
+    if df.empty or 'season' not in df:
+        return pd.DataFrame()
+    rows = []
+    for season, group in df.groupby('season', sort=True):
+        row = {'season': season, 'records': len(group), 'teams': ', '.join(group['team'].dropna().astype(str).unique()) if 'team' in group else ''}
+        for metric in metrics:
+            stats = metric_summary(group, metric)
+            row[metric] = stats['average'] if is_rate(metric) else stats['total']
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def leaderboard(df: pd.DataFrame, metric: str, total=True) -> pd.DataFrame:
+    if df.empty or metric not in df:
+        return pd.DataFrame(columns=['competitor_id', 'competitor', 'team', metric, 'records'])
+    key = 'competitor_id' if 'competitor_id' in df else 'competitor'
+    rows = []
+    for identity, group in df.groupby(key):
+        stats = metric_summary(group, metric)
+        value = stats['total'] if total and not is_rate(metric) else stats['average']
+        latest = group.sort_values('date').iloc[-1] if 'date' in group else group.iloc[-1]
+        rows.append({'competitor_id': identity, 'competitor': latest['competitor'], 'team': latest['team'], metric: value, 'records': len(group)})
+    return pd.DataFrame(rows).sort_values(metric, ascending=lower_is_better(metric), na_position='last').reset_index(drop=True)

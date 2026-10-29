@@ -1,92 +1,172 @@
-"""GameSense 0.3 — polished, native, sport-themed Qt desktop experience."""
+"""Native Qt workspace for exploring a persistent, source-attributed sports archive.
+
+Network jobs run in Qt's thread pool; only queued signals touch widgets. Tables
+use a Qt model over a bounded query, so navigation never loads an entire archive.
+"""
 from __future__ import annotations
-
-from datetime import date
+import json
+import threading
 from pathlib import Path
-from time import sleep
-
+from html import escape
 import pandas as pd
-from PySide6.QtCore import QObject, Qt, QThread, QRectF, QLineF, Signal, Slot
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton,
-    QProgressBar, QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
-)
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.figure import Figure
-
-from .analytics import SPORTS, clean_data, rankings, recent_form, summary
-from .demo import demo_data
+from PySide6.QtCore import Qt, QObject, Signal, QRunnable, QThreadPool, QTimer, QSettings, QAbstractTableModel, QModelIndex, QRectF
+from PySide6.QtGui import QColor, QPainter, QPen, QFont, QPainterPath, QLinearGradient, QIcon
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+    QPushButton, QComboBox, QLineEdit, QFileDialog, QMessageBox, QTableView, QFrame, QLayout,
+    QStackedWidget, QScrollArea, QHeaderView, QProgressBar, QCheckBox, QTabWidget, QSpinBox)
+from .analytics import SPORTS, clean_data, metric_summary, season_history, leaderboard, is_rate
 from .importers import prepare_import
-from .providers import COVERAGE, SOURCE_URLS, fetch_season
-from .history import EARLIEST, FAMILIES, GRAIN, cache_years, plan_years, merge_season
-from . import storage
+from .archive import Archive
+from .providers import PROVIDERS
+from .http import HttpClient
+from .charts import AnalyticsChart, MODES, available_metrics
+from .images import PortraitWidget
 
-STYLES = {
-    "Soccer": {"accent": "#24E6A4", "second": "#0C664C", "label": "PITCH MODE", "title": "FOOTBALL / SOCCER", "icon": "⚽", "tagline": "Every attack tells a story."},
-    "NBA": {"accent": "#FF9B57", "second": "#824021", "label": "COURT MODE", "title": "BASKETBALL / NBA", "icon": "🏀", "tagline": "Beyond the box score."},
-    "AFL": {"accent": "#F2C66D", "second": "#805B21", "label": "OVAL MODE", "title": "AUSTRALIAN FOOTBALL", "icon": "🏉", "tagline": "Own every contest."},
-    "F1": {"accent": "#FF5676", "second": "#781E34", "label": "RACE MODE", "title": "FORMULA 1", "icon": "🏎", "tagline": "Find every millisecond."},
+SPORT_STYLES = {
+    'Soccer': ('#51e2a3', 'PITCH MODE', 'Football intelligence', 'Read the game beyond the scoreline.'),
+    'NBA': ('#ffae73', 'COURT MODE', 'Basketball intelligence', 'Every possession tells a bigger story.'),
+    'AFL': ('#e8c977', 'OVAL MODE', 'Australian football intelligence', 'Find the patterns across the oval.'),
+    'F1': ('#ff6c76', 'RACE MODE', 'Race intelligence', 'Decades of racing. A clearer racing line.'),
 }
-
-STYLE = """
-QMainWindow, QWidget#central {background:#080E19;}\nQWidget {color:#E9F1FF; font:12px 'Segoe UI',Arial;}\nQLabel {background:transparent;}
-QFrame#sidebar {background:#0E1726; border-right:1px solid #233349;}
-QFrame#card, QFrame#graphPanel, QFrame#filterPanel {background:#111E30; border:1px solid #24344C; border-radius:16px;}
-QFrame#card:hover {border:1px solid #435975;}
-QLabel#brand {font-size:24px; font-weight:900; letter-spacing:1px; color:white;}
-QLabel#subtitle {color:#8299B6; font-size:11px;}
-QLabel#section {font-size:20px; font-weight:800; color:#F4F8FF;}
-QLabel#kpi {font-size:28px; font-weight:800; color:#F8FAFF;}
-QLabel#eyebrow {font-size:11px; font-weight:700; color:#93A7BF;}
-QLabel#content {color:#BBCCDF; font-size:12px;}
-QLabel#status {padding:10px; background:#19283B; border-radius:9px; color:#B3C8E2;}
-QPushButton {background:#1A2B43; border:1px solid #2E4565; color:#E8F1FF; border-radius:10px; padding:10px 14px; font-weight:650;}
-QPushButton:hover {background:#263C5A; border-color:#54708D;}
-QPushButton:disabled {color:#6C7C91; background:#142133;}
-QPushButton#nav {border:0; background:transparent; text-align:left; padding:13px 15px; font-size:13px;}
-QPushButton#nav:hover {background:#203047;}
-QPushButton#nav[active="true"] {background:#263851; color:white; border-left:3px solid #24E6A4;}
-QPushButton#sport {border:1px solid transparent; background:transparent; text-align:left; padding:12px 14px;}
-QPushButton#sport:hover {background:#192A3F;}
-QPushButton#sport[active="true"] {background:#1D2F44; border:1px solid #4A6077;}
-QPushButton#primary {background:#24E6A4; border:0; color:#07211C; font-weight:800;}
-QComboBox,QLineEdit,QSpinBox {background:#17263A; border:1px solid #34506B; border-radius:9px; padding:9px; color:white; min-height:18px;}
-QComboBox QAbstractItemView {background:#182840; color:white; selection-background-color:#355672;}
-QTableWidget {background:#101B2C; alternate-background-color:#18263A; color:#ECF2FD; border:1px solid #23344D; border-radius:10px; gridline-color:#263955; selection-background-color:#31536D;}
-QHeaderView::section {background:#21334C; border:0; border-bottom:1px solid #42536B; color:#DBE9FB; padding:10px; font-weight:700;}
-QScrollArea {background:#080E19; border:0;}\nQScrollArea > QWidget > QWidget {background:#080E19;}\nQScrollBar:vertical {background:#0D1826; width:10px;}
-QScrollBar::handle:vertical {background:#30435D; border-radius:5px;}
+BASE_STYLE = """
+QWidget { background:#0e1116; color:#e9edf3; font-family:'Segoe UI'; font-size:12px; }
+QMainWindow { background:#0e1116; }
+QFrame#sidebar { background:#10151c; border-right:1px solid #242b34; }
+QLabel { background:transparent; }
+QLabel#brand { font-size:24px; font-weight:800; letter-spacing:2px; }
+QLabel#muted { color:#96a2b3; }
+QLabel#eyebrow { color:ACCENT; font-size:10px; font-weight:700; letter-spacing:2px; }
+QLabel#heading { font-size:27px; font-weight:700; }
+QLabel#section { font-size:17px; font-weight:650; }
+QLabel#number { font-size:29px; font-weight:700; }
+QFrame#panel { background:#151b23; border:1px solid #28313d; border-radius:12px; }
+QPushButton { background:#202935; border:1px solid #303c4b; padding:9px 14px; border-radius:7px; font-weight:600; }
+QPushButton:hover { background:#2b3848; border-color:ACCENT; }
+QPushButton:disabled { color:#606e7d; border-color:#28313d; }
+QPushButton#primary { background:ACCENT; color:#10171a; border:0; }
+QPushButton#nav { background:transparent; text-align:left; border:0; padding:11px 14px; color:#a3afbe; }
+QPushButton#nav:checked { background:#24313a; color:ACCENT; border-left:3px solid ACCENT; }
+QLineEdit,QComboBox,QSpinBox { background:#141c25; border:1px solid #303b49; border-radius:6px; padding:8px; selection-background-color:#375a60; }
+QLineEdit:focus,QComboBox:focus { border-color:ACCENT; }
+QComboBox::drop-down { border:0; width:22px; }
+QComboBox QAbstractItemView { background:#1b2633; selection-background-color:#36545c; }
+QScrollArea,QStackedWidget { border:0; }
+QScrollBar:vertical { background:#11171f; width:9px; margin:0; }
+QScrollBar::handle:vertical { background:#344354; min-height:32px; border-radius:4px; }
+QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical { height:0; }
+QTableView { background:#151b23; alternate-background-color:#19212b; border:1px solid #293440; border-radius:8px; gridline-color:#27313b; selection-background-color:#2a4753; }
+QHeaderView::section { background:#202a36; color:#acbacb; padding:9px; border:0; font-weight:600; }
+QTableView::item { padding:6px; }
+QProgressBar { border:1px solid #303c49; border-radius:5px; text-align:center; min-height:18px; }
+QProgressBar::chunk { background:ACCENT; border-radius:4px; }
+QTabWidget::pane { border:0; }
+QTabBar::tab { background:#1b2530; padding:10px 18px; margin-right:4px; border-radius:5px; color:#a2afc0; }
+QTabBar::tab:selected { background:#2b3d45; color:ACCENT; }
+QToolTip { color:#e9edf3; background:#243341; border:1px solid #567184; padding:7px; }
+QCheckBox { spacing:8px; }
 """
 
-def label(text="", name=None, wrap=False):
-    w = QLabel(str(text))
-    if name:
-        w.setObjectName(name)
-    w.setWordWrap(wrap)
-    return w
+
+def label(text='', kind=None, wrap=False):
+    widget = QLabel(text)
+    widget.setTextFormat(Qt.TextFormat.PlainText)
+    if kind:
+        widget.setObjectName(kind)
+    widget.setWordWrap(wrap)
+    return widget
 
 
-def panel(title=None):
-    box = QFrame()
-    box.setObjectName("graphPanel")
-    layout = QVBoxLayout(box)
-    layout.setContentsMargins(16, 14, 16, 14)
-    layout.setSpacing(9)
-    if title:
-        layout.addWidget(label(title, "eyebrow"))
-    return box, layout
+def button(text, slot, primary=False):
+    widget = QPushButton(text)
+    if primary:
+        widget.setObjectName('primary')
+    widget.clicked.connect(slot)
+    return widget
 
 
-class SportHero(QWidget):
-    """Paint original vector pitch/court/oval/track art — no licensed imagery."""
-    def __init__(self):
+def panel():
+    frame = QFrame()
+    frame.setObjectName('panel')
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(20, 18, 20, 18)
+    layout.setSpacing(12)
+    return frame, layout
+
+
+def fmt(value):
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    if value is None or pd.isna(value):
+        return '—'
+    if isinstance(value, (int, float)):
+        return f'{value:,.0f}' if float(value).is_integer() else f'{value:,.2f}'
+    return str(value)
+
+
+class DataModel(QAbstractTableModel):
+    """Missing numeric values stay missing and sorting uses their numeric values."""
+    def __init__(self, frame=None, parent=None):
+        super().__init__(parent)
+        self.frame = frame if frame is not None else pd.DataFrame()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.frame)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.frame.columns)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or index.row() >= len(self.frame) or index.column() >= len(self.frame.columns):
+            return None
+        value = self.frame.iat[index.row(), index.column()]
+        if role == Qt.ItemDataRole.DisplayRole:
+            return fmt(value)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return str(self.frame.columns[index.column()]) + ': ' + fmt(value)
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            return int(Qt.AlignmentFlag.AlignVCenter | (Qt.AlignmentFlag.AlignRight if isinstance(value, (int, float)) else Qt.AlignmentFlag.AlignLeft))
+        return None
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DisplayRole:
+            if orientation == Qt.Orientation.Horizontal and (section < 0 or section >= len(self.frame.columns)):
+                return None
+            return str(self.frame.columns[section]).replace('_', ' ').title() if orientation == Qt.Orientation.Horizontal else str(section + 1)
+        return None
+
+    def sort(self, column, order):
+        if column < 0 or column >= len(self.frame.columns):
+            return
+        self.layoutAboutToBeChanged.emit()
+        self.frame = self.frame.sort_values(self.frame.columns[column], ascending=order == Qt.SortOrder.AscendingOrder, na_position='last').reset_index(drop=True)
+        self.layoutChanged.emit()
+
+
+class Signals(QObject):
+    done = Signal(object)
+    failed = Signal(str)
+    progress = Signal(str)
+
+
+class Job(QRunnable):
+    def __init__(self, fn):
         super().__init__()
-        self.sport = "Soccer"
-        self.setMinimumHeight(185)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.fn = fn
+        self.signals = Signals()
+
+    def run(self):
+        try:
+            self.signals.done.emit(self.fn(self.signals.progress.emit))
+        except Exception as exc:
+            self.signals.failed.emit(f'{type(exc).__name__}: {exc}')
+
+
+class SportBanner(QWidget):
+    """Original vector artwork is decorative, never presented as measured tracking."""
+    def __init__(self, sport='Soccer'):
+        super().__init__()
+        self.sport = sport
+        self.setMinimumHeight(176)
 
     def set_sport(self, sport):
         self.sport = sport
@@ -95,947 +175,1123 @@ class SportHero(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        s = STYLES[self.sport]
-        rect = self.rect().adjusted(1, 1, -1, -1)
-        gradient = QLinearGradient(0, 0, rect.width(), rect.height())
-        gradient.setColorAt(0, QColor("#192D43"))
-        gradient.setColorAt(.60, QColor(s["second"]))
-        gradient.setColorAt(1, QColor("#0D1524"))
+        accent, mode, title, subtitle = SPORT_STYLES[self.sport]
+        rect = QRectF(self.rect().adjusted(0, 0, -1, -1))
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        gradient.setColorAt(0, QColor('#1c2930' if self.sport == 'Soccer' else '#242029' if self.sport == 'F1' else '#23242b'))
+        gradient.setColorAt(1, QColor('#121a21'))
         painter.setBrush(gradient)
-        painter.setPen(QPen(QColor(s["accent"]), 1))
-        painter.drawRoundedRect(rect, 20, 20)
-        x, y, w, h = self.width()*.66, 24, self.width()*.29, self.height()-48
-        painter.setOpacity(.65)
-        painter.setPen(QPen(QColor("#DDEAF5"), 2))
-        if self.sport == "Soccer":
+        painter.setPen(QPen(QColor('#31404b'), 1))
+        painter.drawRoundedRect(rect, 12, 12)
+        x, y, w, h = rect.width() * .70, 27, rect.width() * .26, 120
+        color = QColor(accent)
+        color.setAlpha(135)
+        painter.setPen(QPen(color, 1.6))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.sport == 'Soccer':
             painter.drawRect(QRectF(x, y, w, h))
-            painter.drawLine(QLineF(x+w/2, y, x+w/2, y+h))
-            painter.drawEllipse(QRectF(x+w*.39, y+h*.28, w*.22, h*.44))
-            painter.drawRect(QRectF(x, y+h*.23, w*.17, h*.54))
-            painter.drawRect(QRectF(x+w*.83, y+h*.23, w*.17, h*.54))
-        elif self.sport == "NBA":
+            painter.drawLine(int(x+w/2), y, int(x+w/2), int(y+h))
+            painter.drawEllipse(QRectF(x+w*.35, y+h*.27, w*.3, h*.46))
+            for left in (x, x+w*.82):
+                painter.drawRect(QRectF(left, y+h*.24, w*.18, h*.52))
+        elif self.sport == 'NBA':
             painter.drawRect(QRectF(x, y, w, h))
-            painter.drawLine(QLineF(x+w/2, y, x+w/2, y+h))
-            painter.drawEllipse(QRectF(x+w*.40, y+h*.28, w*.20, h*.44))
-            for xx in (x+w*.03, x+w*.83):
-                painter.drawEllipse(QRectF(xx, y+h*.27, w*.14, h*.46))
-            painter.drawRect(QRectF(x, y+h*.32, w*.17, h*.36))
-            painter.drawRect(QRectF(x+w*.83, y+h*.32, w*.17, h*.36))
-        elif self.sport == "AFL":
+            painter.drawLine(int(x+w/2), y, int(x+w/2), int(y+h))
+            painter.drawEllipse(QRectF(x+w*.39, y+h*.31, w*.22, h*.38))
+            for left in (x, x+w*.78):
+                painter.drawRect(QRectF(left, y+h*.30, w*.22, h*.40))
+                painter.drawEllipse(QRectF(left, y+h*.12, w*.22, h*.76))
+        elif self.sport == 'AFL':
             painter.drawEllipse(QRectF(x, y, w, h))
-            painter.drawEllipse(QRectF(x+w*.37, y+h*.29, w*.26, h*.42))
-            painter.drawLine(QLineF(x+w/2, y, x+w/2, y+h))
-            for yy in (.35, .65):
-                painter.drawLine(QLineF(x+w*.10, y+h*yy, x+w*.25, y+h*yy))
-                painter.drawLine(QLineF(x+w*.75, y+h*yy, x+w*.90, y+h*yy))
+            painter.drawEllipse(QRectF(x+w*.35, y+h*.28, w*.30, h*.44))
+            painter.drawRect(QRectF(x+w*.28, y+h*.20, w*.44, h*.60))
+            for left in (x, x+w):
+                for offset in (-14, -5, 5, 14):
+                    painter.drawLine(int(left), int(y+h/2+offset), int(left+(9 if left == x else -9)), int(y+h/2+offset))
         else:
-            points = [(0,.65),(.14,.65),(.20,.23),(.43,.23),(.47,.48),(.63,.48),(.71,.15),(.97,.15),(.97,.75),(.79,.75)]
             path = QPainterPath()
+            points = [(0,.7),(.15,.83),(.30,.69),(.31,.35),(.53,.32),(.60,.65),(.77,.61),(.91,.20),(1,.13),(.82,.12),(.71,.38),(.47,.1),(.15,.16),(0,.7)]
             path.moveTo(x+points[0][0]*w, y+points[0][1]*h)
-            for a,b in points[1:]:
-                path.lineTo(x+a*w,y+b*h)
-            path.closeSubpath()
-            painter.setPen(QPen(QColor("#FFFFFF"), 5))
+            for a, b in points[1:]:
+                path.lineTo(x+a*w, y+b*h)
             painter.drawPath(path)
-            painter.setPen(QPen(QColor(s["accent"]), 2))
-            painter.drawPath(path)
-        painter.setOpacity(1)
-        painter.setPen(QColor(s["accent"]))
-        painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        painter.drawText(26, 34, s["label"]+"  /  GAMESENSE INTELLIGENCE")
-        painter.setPen(QColor("#FFFFFF"))
-        painter.setFont(QFont("Segoe UI", 23, QFont.Weight.Bold))
-        painter.drawText(25, 89, s["title"])
-        painter.setPen(QColor("#D7E5F3"))
-        painter.setFont(QFont("Segoe UI", 12))
-        painter.drawText(27, 123, s["tagline"])
-        painter.setPen(QColor("#B6CBDA"))
-        painter.setFont(QFont("Segoe UI", 10))
-        painter.drawText(27, 153, "Historical analytics  •  Form  •  Competitor insights")
-
-
-class Viz(FigureCanvasQTAgg):
-    """Native embedded charts with consistent sport palette."""
-    def __init__(self, height=275):
-        self.figure = Figure(figsize=(6.8, 3), facecolor="#111E30", tight_layout=True)
-        super().__init__(self.figure)
-        self.setMinimumHeight(height)
-
-    def render(self, df, sport, people, metric, kind):
-        self.figure.clear()
-        ax = self.figure.add_subplot(111)
-        ax.set_facecolor("#111E30")
-        ax.tick_params(colors="#A6BAD3", labelsize=9)
-        for spine in ax.spines.values():
-            spine.set_color("#29405A")
-        ax.grid(alpha=.12, color="#9ABBD5", axis="y")
-        accent = STYLES[sport]["accent"]
-        palette = [accent, "#75AFFF", "#EFC77C", "#CBA8FF"]
-        if df.empty or metric not in df:
-            ax.text(.5,.5,"No matching statistics yet",color="#B8CADD",ha="center",va="center",transform=ax.transAxes)
-        elif kind == "trend":
-            for i, person in enumerate(people):
-                rows = df[df["competitor"] == person].sort_values("date")
-                values = pd.to_numeric(rows[metric], errors="coerce")
-                if values.notna().any():
-                    ax.plot(rows["date"], values.rolling(5, min_periods=1).mean(),
-                            color=palette[i % len(palette)], linewidth=2.7, label=person)
-                    ax.scatter(rows["date"].iloc[-1:], values.rolling(5,min_periods=1).mean().iloc[-1:],
-                               color=palette[i % len(palette)], s=29)
-            if people and ax.lines:
-                ax.legend(facecolor="#182B42", edgecolor="#314B65", labelcolor="#EDF4FF", fontsize=9)
-            ax.set_title("ROLLING FORM / LAST FIVE RECORDS", color="#D7E7F6", fontsize=10, loc="left", pad=15)
-        elif kind == "sport":
-            chosen = people[0] if people else None
-            subset = df[df["competitor"] == chosen] if chosen else df.iloc[0:0]
-            if subset.empty:
-                ax.text(.5,.5,"Select a competitor to explore",ha="center",va="center",
-                        transform=ax.transAxes,color="#B8CADD")
-            elif sport == "Soccer":
-                if {"wins","draws","losses"} <= set(subset.columns) and (
-                        "record_type" in subset and subset["record_type"].eq("team match").any()):
-                    totals = subset[["wins","draws","losses"]].apply(pd.to_numeric,errors="coerce").sum()
-                    if totals.sum() > 0:
-                        ax.pie(totals, labels=["Wins","Draws","Losses"],
-                               colors=[accent,"#6D90B8","#FF7292"], startangle=90,
-                               wedgeprops={"width":.34,"edgecolor":"#111E30"},
-                               textprops={"color":"#E5EEFC","fontsize":9})
-                        ax.text(0,0,str(int(totals.sum()))+"\nmatches",ha="center",va="center",
-                                color="white",fontsize=11,fontweight="bold")
-                else:
-                    metrics = [m for m in ["goals","assists","shots","passes","tackles"] if m in subset]
-                    avg = subset[metrics].apply(pd.to_numeric,errors="coerce").mean().dropna()
-                    ax.bar(avg.index.astype(str),avg.values,color=accent,alpha=.9)
-                    ax.tick_params(axis="x",labelrotation=20)
-                ax.set_title("FOOTBALL / FORM & ATTACK",color="#DBE8F8",fontsize=10,loc="left",pad=11)
-            elif sport == "F1":
-                if {"grid_position","finish_position"} <= set(subset.columns):
-                    grid = pd.to_numeric(subset["grid_position"],errors="coerce")
-                    finish = pd.to_numeric(subset["finish_position"],errors="coerce")
-                    valid = grid.notna() & finish.notna()
-                    if valid.any():
-                        ax.scatter(grid[valid],finish[valid],s=65,c=accent,alpha=.85,
-                                   edgecolors="#F6F9FF",linewidths=.5)
-                        mx=max(grid[valid].max(),finish[valid].max(),20)
-                        ax.plot([1,mx],[1,mx],color="#778CA6",linestyle="--",alpha=.6)
-                        ax.set_xlim(0,mx+1)
-                        ax.set_ylim(mx+1,0)
-                        ax.set_xlabel("Starting grid",color="#A6BAD3")
-                        ax.set_ylabel("Finishing position",color="#A6BAD3")
-                        ax.text(.03,.03,"Above the line = positions gained",color="#A8C2D8",
-                                transform=ax.transAxes,fontsize=8)
-                ax.set_title("RACECRAFT / GRID VS FINISH",color="#DBE8F8",fontsize=10,loc="left",pad=11)
-            else:
-                fields = (["points","rebounds","assists","steals","blocks"] if sport == "NBA"
-                          else ["disposals","marks","tackles","goals","clearances"])
-                metrics = [m for m in fields if m in subset]
-                avg = subset[metrics].apply(pd.to_numeric,errors="coerce").mean().dropna()
-                if len(avg):
-                    ax.bar([m.replace("_"," ").title() for m in avg.index],
-                           avg.values,color=accent,alpha=.9,width=.55)
-                    ax.tick_params(axis="x",labelrotation=19)
-                ax.set_title(("COURT / PLAYER STAT LINE" if sport == "NBA"
-                              else "OVAL / PLAYER STAT LINE"),
-                             color="#DBE8F8",fontsize=10,loc="left",pad=11)
-        elif kind == "quality":
-            fields = [m for m in df.select_dtypes(include="number").columns if m!="rating"]
-            if fields and len(df):
-                completeness = df[fields].notna().mean().sort_values().tail(8)
-                ax.barh([c.replace("_"," ").title() for c in completeness.index],
-                        completeness.values*100,color=accent,alpha=.85,height=.55)
-                ax.set_xlim(0,100)
-                ax.set_xlabel("Non-missing records (%)",color="#A6BAD3")
-            else:
-                ax.text(.5,.5,"No numeric stat columns available",ha="center",va="center",
-                        transform=ax.transAxes,color="#B8CADD")
-            ax.set_title("DATA QUALITY / METRIC COVERAGE",color="#DBE8F8",fontsize=10,loc="left",pad=11)
-        elif kind == "breakdown":
-            person = people[0] if people else None
-            fields = [m for m in SPORTS[sport]["metrics"] if m in df]
-            if person and fields:
-                row = df[df["competitor"] == person]
-                means = row[fields].apply(pd.to_numeric, errors="coerce").mean().dropna().sort_values()
-                if len(means):
-                    ax.barh([x.replace("_"," ").title() for x in means.index],
-                            means.values, color=accent, height=.52)
-            ax.set_title("PLAYER / TEAM METRIC PROFILE", color="#D7E7F6",fontsize=10,loc="left",pad=12)
-        elif kind == "seasons":
-            for i, person in enumerate(people):
-                person_df = df[df["competitor"] == person]
-                grouped = person_df.groupby("season")[metric].mean().sort_index()
-                if len(grouped):
-                    xs=list(range(len(grouped)))
-                    ax.plot(xs, grouped.values, marker="o", markersize=4,
-                            color=palette[i % len(palette)], linewidth=2.4, label=person)
-                    skip=max(1, len(xs)//7)
-                    ax.set_xticks(xs[::skip])
-                    ax.set_xticklabels([str(y) for y in grouped.index[::skip]],rotation=20)
-            if ax.lines:
-                ax.legend(facecolor="#182B42", edgecolor="#314B65", labelcolor="#EDF4FF", fontsize=8)
-            ax.set_title("SEASON-BY-SEASON EVOLUTION", color="#D7E7F6",fontsize=10,loc="left",pad=12)
-        elif kind == "leaders":
-            averages = df.groupby("competitor")[metric].mean().dropna()
-            lower_better = sport == "F1" and metric in {"finish_position", "grid_position", "qualifying_position"}
-            ranks = (averages.nsmallest(8).sort_values(ascending=False)
-                     if lower_better else averages.nlargest(8).sort_values())
-            if len(ranks):
-                bars = ax.barh(ranks.index.astype(str), ranks.values, color=accent, alpha=.9, height=.62)
-                for bar in bars:
-                    bar.set_alpha(.92)
-            ax.set_title("TOP COMPETITORS / AVERAGE "+metric.replace("_"," ").upper(),
-                         color="#D7E7F6", fontsize=10, loc="left", pad=12)
-        else:
-            grouped = df[df["competitor"].isin(people)].groupby("competitor")[metric].mean().reindex(people).dropna()
-            if len(grouped):
-                ax.barh(grouped.index, grouped.values, color=palette[:len(grouped)], height=.40)
-            ax.set_title("DIRECT METRIC COMPARISON", color="#D7E7F6", fontsize=10, loc="left", pad=12)
-        self.draw_idle()
-
-
-class DownloadWorker(QObject):
-    """Resumable historical download, one completed season delivered at a time.
-
-    Database writes happen on the GUI thread when season_ready is emitted.
-    Successfully finished years therefore survive an interrupted multi-year job.
-    """
-    season_ready = Signal(object, str)
-    progress = Signal(str, int, int)
-    failed = Signal(str)
-    completed = Signal(str)
-    done = Signal()
-
-    def __init__(self, sport, years, contact_email=None):
-        super().__init__()
-        from threading import Event
-        self.sport = sport
-        self.years = list(years)
-        self.contact_email = contact_email
-        self._cancel = Event()
-
-    def cancel(self):
-        self._cancel.set()
-
-    @Slot()
-    def run(self):
-        succeeded, failed, consecutive = 0, [], 0
-        try:
-            for index, year in enumerate(self.years, 1):
-                if self._cancel.is_set():
-                    break
-                self.progress.emit(f"{self.sport}: year {year} ({index}/{len(self.years)})",
-                                   index - 1, len(self.years))
-                try:
-                    df, source = fetch_season(self.sport, year,
-                                              contact_email=self.contact_email)
-                    if df.empty:
-                        raise ValueError("Provider returned no records")
-                    df = df.copy()
-                    df["data_source"] = source
-                    clean, report = clean_data(df, self.sport)
-                    if clean.empty:
-                        raise ValueError("No valid rows")
-                    self.season_ready.emit(clean, source)
-                    succeeded += 1
-                    consecutive = 0
-                except Exception as exc:
-                    consecutive += 1
-                    error = str(exc)
-                    failed.append(f"{year}: {error}")
-                    if "rate limit" in error.lower() or "429" in error or consecutive >= 3:
-                        failed.append("Stopped after provider throttling or three consecutive failures. "
-                                      "Run again later to resume completed years.")
-                        break
-                self.progress.emit(
-                    f"{self.sport}: {succeeded} season(s) loaded, {len(failed)} issue(s)",
-                    index, len(self.years))
-                if index < len(self.years) and self._cancel.wait(1.0):
-                    break
-            result = (f"{succeeded} season(s) saved from {len(self.years)} planned years. "
-                      f"{'Download cancelled. ' if self._cancel.is_set() else ''}"
-                      f"{'Issues: ' + '; '.join(failed[:5]) if failed else ''}")
-            self.completed.emit(result)
-        except Exception as exc:
-            self.failed.emit(str(exc))
-        finally:
-            self.done.emit()
+            painter.setPen(QColor('#97a3b2'))
+            painter.setFont(QFont('Segoe UI', 7))
+            painter.drawText(int(x), int(y+h+14), 'ILLUSTRATIVE CIRCUIT · NO TELEMETRY')
+        painter.setPen(QColor(accent))
+        painter.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        painter.drawText(28, 36, mode + '   /   GAMESENSE ARCHIVE')
+        painter.setPen(QColor('#f3f5f8'))
+        painter.setFont(QFont('Segoe UI', 23, QFont.Weight.Bold))
+        painter.drawText(QRectF(28, 49, rect.width()*.66, 48), Qt.AlignmentFlag.AlignVCenter, title)
+        painter.setPen(QColor('#a8b5c4'))
+        painter.setFont(QFont('Segoe UI', 10))
+        painter.drawText(29, 125, subtitle)
+        painter.end()
 
 
 class GameSenseWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("GameSense  |  Performance Intelligence")
-        self.resize(1470, 920)
-        self.setMinimumSize(1060, 725)
-        self.setStyleSheet(STYLE)
-        self.data, self.sources, self.is_demo = {}, {}, {}
-        for sport in SPORTS:
-            stored = storage.load(sport)
-            if stored is None or stored.empty:
-                stored = demo_data(sport)
-                self.sources[sport] = "FICTIONAL DEMO DATA · NOT REAL PLAYERS OR RESULTS"
-                self.is_demo[sport] = True
-            else:
-                self.sources[sport] = storage.load_source(sport) or "Imported local dataset · provenance unverified"
-                self.is_demo[sport] = False
-            self.data[sport], _ = clean_data(stored, sport)
-        self.current_sport = "Soccer"
-        self.current_page = 0
-        self._thread = None
-        self._job_sport = None
-        self._job_summary = ""
-        self._job_loaded = 0
-        self.build()
-        self.change_sport("Soccer")
+        self.setWindowTitle('GameSense — Sports Intelligence')
+        self.resize(1440, 960)
+        self.setMinimumSize(1040, 720)
+        icon = Path(__file__).resolve().parents[1] / 'assets' / 'gamesense.png'
+        if icon.exists():
+            self.setWindowIcon(QIcon(str(icon)))
+        self.archive = Archive()
+        self.initializing = True
+        self.settings = QSettings(str(Path(self.archive.path).parent / 'preferences.ini'), QSettings.Format.IniFormat)
+        if __import__('os').environ.get('GAMESENSE_OFFLINE') == '1':
+            self.settings.setValue('offline', True)
+        self.pool = QThreadPool(self)
+        self.jobs = {}
+        self.cancel_event = threading.Event()
+        self.download_running = False
+        self.download_seasons = []
+        self.frame = pd.DataFrame()
+        self.profile_frame = pd.DataFrame()
+        self.identities = pd.DataFrame()
+        self.demo = False
+        self.route = 'home'
+        self.page_offset = 0
+        self._build()
+        self._change_sport()
+        self.navigate('home')
+        self.status.setText('Preparing the bundled real historical archive in the background…')
+        self._job('bootstrap', lambda progress: self.archive.seed_bundled(), self._bootstrap_done, self._bootstrap_failed)
 
-    def build(self):
-        base = QWidget()
-        base.setObjectName("central")
-        self.setCentralWidget(base)
-        outer = QHBoxLayout(base)
-        outer.setContentsMargins(0,0,0,0)
-        outer.setSpacing(0)
+    def _bootstrap_done(self, count):
+        self.initializing = False
+        self.status.setText(f'Local archive ready · {count:,} bundled records processed. Downloaded history works offline.')
+        self._change_sport()
 
-        side = QFrame()
-        side.setObjectName("sidebar")
-        side.setFixedWidth(226)
-        sl = QVBoxLayout(side)
-        sl.setContentsMargins(15,22,15,16)
-        sl.setSpacing(7)
-        sl.addWidget(label("GAMESENSE", "brand"))
-        sl.addWidget(label("PERFORMANCE INTELLIGENCE", "subtitle"))
-        sl.addSpacing(29)
-        sl.addWidget(label("YOUR SPORTS", "eyebrow"))
-        self.sport_buttons = {}
-        for sport in SPORTS:
-            btn = QPushButton(f"{STYLES[sport]['icon']}    {STYLES[sport]['title'].title()}")
-            btn.setObjectName("sport")
-            btn.clicked.connect(lambda checked=False, s=sport: self.change_sport(s))
-            sl.addWidget(btn)
-            self.sport_buttons[sport] = btn
-        sl.addSpacing(23)
-        sl.addWidget(label("EXPLORE", "eyebrow"))
-        self.nav_buttons = []
-        for i, name in enumerate(["◈    Overview", "▤    Leaderboards", "⇄    Head to head", "▦    Data studio"]):
-            btn = QPushButton(name)
-            btn.setObjectName("nav")
-            btn.clicked.connect(lambda checked=False, index=i: self.change_page(index))
-            sl.addWidget(btn)
-            self.nav_buttons.append(btn)
-        sl.addStretch()
-        self.sidebar_status = label("", "status", wrap=True)
-        sl.addWidget(self.sidebar_status)
-        sl.addWidget(label("v0.5  •  FULL HISTORY BETA", "subtitle"))
-        outer.addWidget(side)
+    def _bootstrap_failed(self, message):
+        self.initializing = False
+        self.status.setText('Archive preparation failed: ' + message)
 
+    @property
+    def sport_name(self):
+        return self.sport.currentText()
+
+    def _build(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        shell = QHBoxLayout(root)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.setSpacing(0)
+        sidebar = QFrame()
+        sidebar.setObjectName('sidebar')
+        sidebar.setFixedWidth(206)
+        nav = QVBoxLayout(sidebar)
+        nav.setContentsMargins(16, 27, 16, 22)
+        nav.addWidget(label('GAMESENSE', 'brand'))
+        nav.addWidget(label('SPORTS INTELLIGENCE', 'eyebrow'))
+        nav.addSpacing(30)
+        self.nav_buttons = {}
+        for key, title in [('home','Overview'), ('dashboard','Sport dashboard'), ('profiles','Athlete explorer'), ('teams','Teams and rosters'), ('compare','Head to head'), ('leaders','Leaderboards'), ('explorer','Historical records')]:
+            btn = button(title, lambda checked=False, k=key: self.navigate(k))
+            btn.setObjectName('nav')
+            btn.setCheckable(True)
+            self.nav_buttons[key] = btn
+            nav.addWidget(btn)
+        nav.addStretch()
+        nav.addWidget(label('YOUR LIBRARY', 'eyebrow'))
+        for key, title in [('downloads', 'Data manager'), ('settings','Preferences'), ('about','Sources and about')]:
+            btn = button(title, lambda checked=False, k=key: self.navigate(k))
+            btn.setObjectName('nav')
+            btn.setCheckable(True)
+            self.nav_buttons[key] = btn
+            nav.addWidget(btn)
+        nav.addSpacing(14)
+        nav.addWidget(label('DESKTOP  /  0.6.0', 'muted'))
+        shell.addWidget(sidebar)
         body = QWidget()
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(24,20,24,12)
-        bl.setSpacing(12)
-        head = QHBoxLayout()
-        heading = QVBoxLayout()
-        self.page_title = label("The game, decoded.", "section")
-        heading.addWidget(self.page_title)
-        heading.addWidget(label("Scout players, uncover trends and explore the numbers.", "subtitle"))
-        head.addLayout(heading)
-        head.addStretch()
-        self.real_btn = QPushButton("✦  GET REAL HISTORY")
-        self.real_btn.setObjectName("primary")
-        self.real_btn.clicked.connect(self.open_historical_library)
-        head.addWidget(self.real_btn)
-        self.import_btn = QPushButton("＋  Import data")
-        self.import_btn.clicked.connect(self.import_file)
-        head.addWidget(self.import_btn)
-        export_btn = QPushButton("↓  Export CSV")
-        export_btn.clicked.connect(self.export_file)
-        head.addWidget(export_btn)
-        bl.addLayout(head)
-
-        self.hero = SportHero()
-        bl.addWidget(self.hero)
-        self.real_notice = label(
-            "FICTIONAL DEMO RECORDS — NOT REAL PLAYERS. "
-            "Click GET REAL HISTORY to download real seasons for this sport.",
-            "status", wrap=True)
-        bl.addWidget(self.real_notice)
-
-        kpis = QHBoxLayout()
-        kpis.setSpacing(11)
-        self.kpi_widgets = []
-        for name in ["EVENT RECORDS", "COMPETITORS", "TEAMS", "SEASONS", "AVG RATING"]:
-            card = QFrame()
-            card.setObjectName("card")
-            lay = QVBoxLayout(card)
-            lay.setContentsMargins(18,14,18,14)
-            lay.addWidget(label(name, "eyebrow"))
-            val = label("—", "kpi")
-            lay.addWidget(val)
-            self.kpi_widgets.append(val)
-            kpis.addWidget(card,1)
-        bl.addLayout(kpis)
-
-        filters = QFrame()
-        filters.setObjectName("filterPanel")
-        fl = QHBoxLayout(filters)
-        fl.setContentsMargins(14,10,14,10)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(28, 22, 28, 16)
+        layout.setSpacing(17)
+        header = QHBoxLayout()
+        self.breadcrumb = label('WORKSPACE / OVERVIEW', 'eyebrow')
+        header.addWidget(self.breadcrumb)
+        header.addStretch()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText('Search your archive…')
+        self.search.setClearButtonEnabled(True)
+        self.search.setMinimumWidth(210)
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(220)
+        self.search.textChanged.connect(lambda: self.search_timer.start())
+        self.search_timer.timeout.connect(self._search_changed)
+        self.search.returnPressed.connect(lambda: self.navigate('profiles'))
+        header.addWidget(self.search)
+        self.sport = QComboBox()
+        self.sport.addItems(SPORTS)
+        self.sport.setMinimumWidth(118)
+        self.sport.currentTextChanged.connect(self._change_sport)
+        header.addWidget(self.sport)
         self.season = QComboBox()
-        self.season.currentTextChanged.connect(self.refresh_views)
-        self.a = QComboBox()
-        self.a.setMinimumWidth(155)
-        self.a.currentTextChanged.connect(self.refresh_graphs)
-        self.b = QComboBox()
-        self.b.setMinimumWidth(155)
-        self.b.currentTextChanged.connect(self.refresh_graphs)
-        self.metric_combo = QComboBox()
-        self.metric_combo.setMinimumWidth(130)
-        self.metric_combo.currentTextChanged.connect(self.refresh_graphs)
-        for title, widget in [("SEASON",self.season),("ATHLETE / TEAM A",self.a),("COMPARE WITH",self.b),("METRIC",self.metric_combo)]:
-            group = QVBoxLayout()
-            group.setSpacing(3)
-            group.addWidget(label(title,"eyebrow"))
-            group.addWidget(widget)
-            fl.addLayout(group,1)
-        bl.addWidget(filters)
+        self.season.setMinimumWidth(128)
+        self.season.currentTextChanged.connect(self._season_changed)
+        header.addWidget(self.season)
+        layout.addLayout(header)
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack, 1)
+        self.pages = {}
+        self.page_layouts = {}
+        for key in self.nav_buttons:
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(16)
+            page_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(page)
+            self.pages[key] = scroll
+            self.page_layouts[key] = page_layout
+            self.stack.addWidget(scroll)
+        self._build_home()
+        self._build_dashboard()
+        self._build_profiles()
+        self._build_compare()
+        self._build_teams()
+        self._build_leaders()
+        self._build_explorer()
+        self._build_downloads()
+        self._build_settings()
+        self._build_about()
+        self.status = label('Local archive ready. Downloaded records remain available offline.', 'muted', True)
+        layout.addWidget(self.status)
+        shell.addWidget(body, 1)
 
-        self.pages = QStackedWidget()
-        bl.addWidget(self.pages,1)
-        # Overview: a large performance timeline and top-eight ranking, plus clear source attribution.
+    def _table(self, minimum=230):
+        table = QTableView()
+        table.setMinimumHeight(minimum)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
+        table.setSortingEnabled(True)
+        table.verticalHeader().hide()
+        table.horizontalHeader().setStretchLastSection(True)
+        return table
+
+    def _fill(self, table, frame):
+        table.setSortingEnabled(False)
+        old = table.model()
+        table.setModel(DataModel(frame.reset_index(drop=True), table))
+        if old is not None:
+            old.deleteLater()
+        table.resizeColumnsToContents()
+        for i in range(len(frame.columns)):
+            table.setColumnWidth(i, min(280, max(95, table.columnWidth(i))))
+        table.horizontalHeader().setStretchLastSection(True)
+        # Keep the query's meaningful initial order. Qt otherwise sorts a fresh
+        # model by its first (often technical identifier) column automatically.
+        table.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        table.setSortingEnabled(True)
+
+    def _heading(self, layout, eyebrow, title, subtitle):
+        layout.addWidget(label(eyebrow, 'eyebrow'))
+        layout.addWidget(label(title, 'heading', True))
+        layout.addWidget(label(subtitle, 'muted', True))
+
+    def _build_home(self):
+        layout = self.page_layouts['home']
+        self._heading(layout, 'FOUR SPORTS. ONE PERSPECTIVE.', 'The game. In greater detail.', 'Explore real sporting history, trace a career, and turn records into a clearer picture.')
+        self.home_grid = QGridLayout()
+        self.home_counts = {}
+        for index, sport in enumerate(SPORTS):
+            frame, inner = panel()
+            inner.addWidget(label(SPORT_STYLES[sport][1], 'eyebrow'))
+            inner.addWidget(label({'Soccer':'Football', 'NBA':'Basketball', 'AFL':'Australian football', 'F1':'Formula 1'}[sport], 'section'))
+            count = label('', 'muted', True)
+            self.home_counts[sport] = count
+            inner.addWidget(count)
+            inner.addWidget(button('Explore archive  →', lambda checked=False, s=sport: self.open_sport(s), True))
+            self.home_grid.addWidget(frame, index//2, index%2)
+        layout.addLayout(self.home_grid)
+        frame, inner = panel()
+        inner.addWidget(label('Your archive, with the context intact.', 'section'))
+        inner.addWidget(label('Each record keeps its provider and identity. Empty statistics stay empty. Historical coverage varies by competition and era; the Data Manager shows what is actually stored.', 'muted', True))
+        inner.addWidget(button('Manage historical downloads', lambda: self.navigate('downloads')))
+        layout.addWidget(frame)
+        layout.addStretch()
+
+    def _chart_controls(self, chart, parent_layout, callback):
+        controls = QHBoxLayout()
+        metric = QComboBox()
+        metric.setMinimumWidth(160)
+        mode = QComboBox()
+        mode.addItems(MODES)
+        controls.addWidget(label('METRIC', 'muted'))
+        controls.addWidget(metric)
+        controls.addWidget(mode)
+        controls.addStretch()
+        controls.addWidget(button('Save chart', lambda: self._export_chart(chart)))
+        controls.addWidget(button('Export chart data', lambda: self._export_chart_data(chart)))
+        metric.currentTextChanged.connect(callback)
+        mode.currentTextChanged.connect(callback)
+        chart.pointSelected.connect(self._open_identity)
+        parent_layout.addLayout(controls)
+        parent_layout.addWidget(chart)
+        return metric, mode
+
+    def _build_dashboard(self):
+        layout = self.page_layouts['dashboard']
+        self.banner = SportBanner()
+        layout.addWidget(self.banner)
+        self.coverage_note = label('', 'muted', True)
+        layout.addWidget(self.coverage_note)
+        cards = QHBoxLayout()
+        self.stat_values = []
+        for title in ['LOCAL RECORDS', 'IDENTITIES', 'TEAMS', 'SEASONS']:
+            frame, inner = panel()
+            inner.addWidget(label(title, 'muted'))
+            value = label('—', 'number')
+            inner.addWidget(value)
+            self.stat_values.append(value)
+            cards.addWidget(frame)
+        layout.addLayout(cards)
+        frame, inner = panel()
+        inner.addWidget(label('Performance, in perspective', 'section'))
+        self.dash_chart = AnalyticsChart()
+        self.dash_metric, self.dash_mode = self._chart_controls(self.dash_chart, inner, self._plot_dashboard)
+        layout.addWidget(frame)
+        self.featured = QHBoxLayout()
+        layout.addWidget(label('FROM YOUR ARCHIVE', 'eyebrow'))
+        layout.addLayout(self.featured)
+        layout.addStretch()
+
+    def _build_profiles(self):
+        layout = self.page_layouts['profiles']
+        self._heading(layout, 'ATHLETE EXPLORER', 'The career behind the numbers.', 'Search downloaded identities. Select an athlete to explore every locally available season.')
+        self.athlete = QComboBox()
+        self.athlete.setEditable(True)
+        self.athlete.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.athlete.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.athlete.setMinimumWidth(270)
+        self.athlete.currentIndexChanged.connect(self._load_profile)
+        row = QHBoxLayout()
+        row.addWidget(self.athlete, 1)
+        self.fav_button = button('Save favourite', self._toggle_favourite)
+        row.addWidget(self.fav_button)
+        row.addWidget(button('Retrieve missing history', lambda: self.navigate('downloads')))
+        layout.addLayout(row)
+        filters = QHBoxLayout()
+        self.era_start, self.era_end = QSpinBox(), QSpinBox()
+        for spin in (self.era_start, self.era_end):
+            spin.setRange(0, 2100)
+            spin.setSpecialValueText('Any year')
+            spin.setSingleStep(1)
+            spin.valueChanged.connect(self._identity_filters_changed)
+        filters.addWidget(label('Recorded seasons from', 'muted'))
+        filters.addWidget(self.era_start)
+        filters.addWidget(label('through', 'muted'))
+        filters.addWidget(self.era_end)
+        self.favourites_only = QCheckBox('Favourites only')
+        self.favourites_only.toggled.connect(self._identity_filters_changed)
+        filters.addWidget(self.favourites_only)
+        filters.addStretch()
+        layout.addLayout(filters)
+        frame, inner = panel()
+        hero = QHBoxLayout()
+        self.portrait = PortraitWidget(size=168)
+        hero.addWidget(self.portrait)
+        text = QVBoxLayout()
+        self.profile_name = label('Choose an athlete', 'heading', True)
+        self.profile_meta = label('', 'muted', True)
+        self.profile_summary = label('', 'muted', True)
+        text.addWidget(label('CAREER PROFILE', 'eyebrow'))
+        text.addWidget(self.profile_name)
+        text.addWidget(self.profile_meta)
+        text.addWidget(self.profile_summary)
+        numbers = QHBoxLayout()
+        self.hero_metrics = []
+        for _ in range(3):
+            stat = QVBoxLayout()
+            value, caption = label('—', 'section'), label('', 'muted')
+            stat.addWidget(value)
+            stat.addWidget(caption)
+            numbers.addLayout(stat)
+            self.hero_metrics.append((value, caption))
+        text.addLayout(numbers)
+        text.addStretch()
+        hero.addLayout(text, 1)
+        inner.addLayout(hero)
+        self.image_credit = label('Portraits are licensed individually. A silhouette means no verified photograph is cached.', 'muted', True)
+        self.image_credit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.portrait.attributionChanged.connect(self.image_credit.setText)
+        inner.addWidget(self.image_credit)
+        layout.addWidget(frame)
+        tabs = QTabWidget()
         overview = QWidget()
         ov = QVBoxLayout(overview)
-        ov.setContentsMargins(0,0,0,0)
-        graphs = QHBoxLayout()
-        p1,l1=panel("PERFORMANCE TREND")
-        self.trend = Viz(245)
-        l1.addWidget(self.trend)
-        graphs.addWidget(p1, 3)
-        p2,l2=panel("THE LEADERBOARD")
-        self.leaders = Viz(245)
-        l2.addWidget(self.leaders)
-        graphs.addWidget(p2, 2)
-        ov.addLayout(graphs)
-        extra = QHBoxLayout()
-        p4,l4=panel("STATISTICAL BREAKDOWN")
-        self.breakdown = Viz(218)
-        l4.addWidget(self.breakdown)
-        extra.addWidget(p4,2)
-        p5,l5=panel("HISTORICAL SEASONS")
-        self.seasons_chart = Viz(218)
-        l5.addWidget(self.seasons_chart)
-        extra.addWidget(p5,3)
-        ov.addLayout(extra)
-        detail_row = QHBoxLayout()
-        p6,l6=panel("SPORT-SPECIFIC INTELLIGENCE")
-        self.sport_chart=Viz(220)
-        l6.addWidget(self.sport_chart)
-        detail_row.addWidget(p6,3)
-        p7,l7=panel("RECORD COMPLETENESS")
-        self.quality_chart=Viz(220)
-        l7.addWidget(self.quality_chart)
-        detail_row.addWidget(p7,2)
-        ov.addLayout(detail_row)
-        insight_card, inslay = panel("GAME INSIGHT / WHAT THE DATA SHOWS")
-        self.insight = label("", "content", wrap=True)
-        inslay.addWidget(self.insight)
-        ov.addWidget(insight_card)
-        scroll=QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(overview)
-        self.pages.addWidget(scroll)
+        self.profile_chart = AnalyticsChart()
+        self.profile_metric, self.profile_mode = self._chart_controls(self.profile_chart, ov, self._plot_profile)
+        self.profile_detail = label('', 'muted', True)
+        ov.addWidget(self.profile_detail)
+        tabs.addTab(overview, 'Performance evolution')
+        history = QWidget()
+        hl = QVBoxLayout(history)
+        self.history_table = self._table(270)
+        hl.addWidget(self.history_table)
+        tabs.addTab(history, 'Season history')
+        advanced = QWidget()
+        al = QVBoxLayout(advanced)
+        self.advanced_table = self._table(270)
+        al.addWidget(self.advanced_table)
+        tabs.addTab(advanced, 'Available statistics')
+        sources = QWidget()
+        sl = QVBoxLayout(sources)
+        self.profile_sources = label('', 'muted', True)
+        self.profile_sources.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        sl.addWidget(self.profile_sources)
+        sl.addStretch()
+        tabs.addTab(sources, 'Sources & coverage')
+        layout.addWidget(tabs)
+        layout.addStretch()
 
-        leaderboard = QWidget()
-        ll = QVBoxLayout(leaderboard)
-        ll.setContentsMargins(0,0,0,0)
-        search_row = QHBoxLayout()
-        search_row.addWidget(label("PLAYER / TEAM LEADERBOARD","section"))
-        search_row.addStretch()
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Search competitors...")
-        self.search.textChanged.connect(self.fill_rankings)
-        search_row.addWidget(self.search)
-        ll.addLayout(search_row)
-        self.rank_table = QTableWidget()
-        self.rank_table.setAlternatingRowColors(True)
-        ll.addWidget(self.rank_table)
-        self.pages.addWidget(leaderboard)
+    def _build_compare(self):
+        layout = self.page_layouts['compare']
+        self._heading(layout, 'HEAD TO HEAD', 'Two careers. A clearer comparison.', 'Compare the same statistic within the selected sport and season. Missing values are never substituted with zero.')
+        row = QHBoxLayout()
+        self.compare_a, self.compare_b = QComboBox(), QComboBox()
+        self.compare_portraits = []
+        for combo in (self.compare_a, self.compare_b):
+            frame, inner = panel()
+            portrait = PortraitWidget(size=120)
+            inner.addWidget(portrait, alignment=Qt.AlignmentFlag.AlignHCenter)
+            inner.addWidget(combo)
+            combo.currentIndexChanged.connect(self._load_comparison)
+            self.compare_portraits.append(portrait)
+            row.addWidget(frame)
+        layout.addLayout(row)
+        self.compare_chart = AnalyticsChart()
+        self.compare_metric, self.compare_mode = self._chart_controls(self.compare_chart, layout, self._plot_comparison)
+        self.compare_table = self._table(170)
+        layout.addWidget(self.compare_table)
+        layout.addStretch()
 
-        comparison = QWidget()
-        cl = QVBoxLayout(comparison)
-        cl.setContentsMargins(0,0,0,0)
-        p3,l3=panel("HEAD TO HEAD / SAME SPORT AND SEASON")
-        self.comparison = Viz(255)
-        l3.addWidget(self.comparison)
-        cl.addWidget(p3,2)
-        self.compare_table = QTableWidget()
-        cl.addWidget(self.compare_table, 2)
-        self.pages.addWidget(comparison)
+    def _build_teams(self):
+        layout = self.page_layouts['teams']
+        self._heading(layout, 'TEAMS & ROSTERS', 'The people behind the badge.', 'Team membership is taken from the selected downloaded season, including recorded transfers. Neutral badges avoid unlicensed club marks.')
+        self.team_select = QComboBox()
+        self.team_select.currentTextChanged.connect(self._load_team)
+        layout.addWidget(self.team_select)
+        self.team_note = label('', 'muted', True)
+        layout.addWidget(self.team_note)
+        self.roster_grid = QGridLayout()
+        layout.addLayout(self.roster_grid)
+        self.team_table = self._table()
+        layout.addWidget(self.team_table)
+        layout.addStretch()
 
-        data_page = QWidget()
-        dl = QVBoxLayout(data_page)
-        dl.setContentsMargins(0,0,0,0)
-        source_box, sbl = panel("DATA ORIGIN / VERIFIED COVERAGE")
-        self.coverage_label = label("", "content", wrap=True)
-        sbl.addWidget(self.coverage_label)
+    def _build_leaders(self):
+        layout = self.page_layouts['leaders']
+        self._heading(layout, 'LEADERBOARDS', 'Standouts, with the evidence.', 'Rankings below use the current bounded query. Download more history or narrow the season for a meaningful cohort.')
         controls = QHBoxLayout()
-        controls.addWidget(label("HISTORICAL YEARS", "eyebrow"))
-        self.start_year = QSpinBox()
-        self.start_year.setRange(1950, date.today().year)
-        self.start_year.setValue(date.today().year-5)
-        self.end_year = QSpinBox()
-        self.end_year.setRange(1950, date.today().year)
-        self.end_year.setValue(date.today().year-1)
-        controls.addWidget(label("FROM", "eyebrow"))
-        controls.addWidget(self.start_year)
-        controls.addWidget(label("TO", "eyebrow"))
-        controls.addWidget(self.end_year)
-        self.download_btn = QPushButton("↓  Load selected years")
-        self.download_btn.setObjectName("primary")
-        self.download_btn.clicked.connect(self.download_season)
-        controls.addWidget(self.download_btn)
-        self.all_years_btn = QPushButton("★  LOAD ALL AVAILABLE YEARS")
-        self.all_years_btn.clicked.connect(self.load_all_years)
-        controls.addWidget(self.all_years_btn)
-        self.cancel_btn = QPushButton("Stop")
-        self.cancel_btn.clicked.connect(self.cancel_download)
-        self.cancel_btn.setEnabled(False)
-        controls.addWidget(self.cancel_btn)
-        sbl.addLayout(controls)
-        self.archive_progress = QProgressBar()
-        self.archive_progress.setMinimum(0)
-        self.archive_progress.setMaximum(100)
-        self.archive_progress.setValue(0)
-        self.archive_progress.setTextVisible(True)
-        sbl.addWidget(self.archive_progress)
-        self.archive_info = label("No historical download in progress.", "content", wrap=True)
-        sbl.addWidget(self.archive_info)
-        self.afl_email_label = label("SQUIGGLE CONTACT EMAIL (REQUIRED FOR AFL TEAM DATA)", "eyebrow")
-        self.afl_email = QLineEdit()
-        self.afl_email.setPlaceholderText("Your contact email — sent to Squiggle only, not stored")
-        self.afl_email.setToolTip("Squiggle requires a contact email in each API User-Agent. "
-                                "Only AFL match requests send this address; GameSense does not save it.")
-        sbl.addWidget(self.afl_email_label)
-        sbl.addWidget(self.afl_email)
-        dl.addWidget(source_box)
-        dl.addWidget(label("SAVED EVENT / PLAYER RECORDS", "section"))
-        self.raw_table = QTableWidget()
-        self.raw_table.setAlternatingRowColors(True)
-        dl.addWidget(self.raw_table,1)
-        self.pages.addWidget(data_page)
-        self.data_badge = label("CUSTOM RATINGS ARE EXPERIMENTAL. MISSING STATS ARE NOT ZERO.", "subtitle")
-        bl.addWidget(self.data_badge)
-        outer.addWidget(body,1)
-        self.change_page(0)
+        self.leader_metric = QComboBox()
+        self.leader_metric.currentTextChanged.connect(self._load_leaders)
+        self.leader_total = QCheckBox('Compare totals (rates use averages)')
+        self.leader_total.setChecked(True)
+        self.leader_total.toggled.connect(self._load_leaders)
+        controls.addWidget(self.leader_metric)
+        controls.addWidget(self.leader_total)
+        controls.addStretch()
+        controls.addWidget(button('Export standings', self._export_leaders))
+        layout.addLayout(controls)
+        self.leaders_featured = QHBoxLayout()
+        layout.addLayout(self.leaders_featured)
+        self.leader_table = self._table(380)
+        self.leader_table.doubleClicked.connect(lambda index: self._open_table_identity(self.leader_table, index))
+        layout.addWidget(self.leader_table)
+        layout.addStretch()
 
-    def change_page(self,index):
-        self.current_page = index
-        self.pages.setCurrentIndex(index)
-        titles = ["The game, decoded.", "Rankings & records.", "Head-to-head intelligence.", "Your data command centre."]
-        self.page_title.setText(titles[index])
-        for i,btn in enumerate(self.nav_buttons):
-            btn.setProperty("active", "true" if i==index else "false")
-            btn.style().unpolish(btn); btn.style().polish(btn)
+    def _build_explorer(self):
+        layout = self.page_layouts['explorer']
+        self._heading(layout, 'HISTORICAL RECORDS', 'The source of every insight.', 'Browse a page of the archive. Every row retains its source, identity, record type and season.')
+        controls = QHBoxLayout()
+        controls.addWidget(button('Import CSV / Excel', self._import_file, True))
+        controls.addWidget(button('Export visible records', self._export_records))
+        controls.addStretch()
+        self.previous = button('← Previous', lambda: self._turn_page(-1))
+        self.next_page = button('Next →', lambda: self._turn_page(1))
+        controls.addWidget(self.previous)
+        controls.addWidget(self.next_page)
+        layout.addLayout(controls)
+        self.explorer_note = label('', 'muted', True)
+        layout.addWidget(self.explorer_note)
+        self.raw_table = self._table(470)
+        self.raw_table.doubleClicked.connect(lambda index: self._open_table_identity(self.raw_table, index))
+        layout.addWidget(self.raw_table)
+        layout.addStretch()
 
-    def change_sport(self,sport):
-        previous_sport = self.current_sport
-        self.current_sport = sport
-        style=STYLES[sport]
-        self.hero.set_sport(sport)
-        # Every sport accents the *entire* navigation and controls, not only
-        # the hero artwork. Transparent labels keep panels visually seamless.
-        self.setStyleSheet(STYLE.replace("#24E6A4",style["accent"]))
-        self.import_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
-        self.download_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
-        self.real_btn.setStyleSheet(f"QPushButton {{background:{style['accent']}; color:#071622; border:0; font-weight:800}}")
-        for key,btn in self.sport_buttons.items():
-            btn.setProperty("active","true" if key==sport else "false")
-            btn.style().unpolish(btn); btn.style().polish(btn)
-        real = not self.is_demo[sport]
-        years_in_cache = cache_years(self.data[sport], sport) if real else set()
-        self.sidebar_status.setText(
-            (f"●  {len(years_in_cache)} REAL SEASONS" if real else "●  FICTIONAL DEMO ONLY")
-            + "\n" + style["label"])
-        self.real_notice.setVisible(self.is_demo[sport])
-        self.real_btn.setText("✦  GET REAL HISTORY" if self.is_demo[sport]
-                              else "✦  ADD MORE REAL YEARS")
-        df=self.data[sport]
-        self.season.blockSignals(True)
-        prev="All seasons" if previous_sport != sport else self.season.currentText()
-        self.season.clear()
-        self.season.addItems(["All seasons"]+sorted(df["season"].dropna().astype(str).unique(),reverse=True))
-        if prev in [self.season.itemText(i) for i in range(self.season.count())]:
-            self.season.setCurrentText(prev)
-        self.season.blockSignals(False)
-        self._set_metric_items()
-        self.coverage_label.setText(
-            f"CURRENT DATA: {self.sources[sport]}\n\n"
-            f"AVAILABLE CONNECTOR: {COVERAGE[sport][0]}\n"
-            f"LIMITATIONS: {COVERAGE[sport][1]}\n"
-            f"Source information: {SOURCE_URLS[sport]}\n"
-            "Data downloads are on demand; complete historical coverage is not guaranteed."
-        )
-        self.download_btn.setEnabled(self._thread is None)
-        self.all_years_btn.setEnabled(self._thread is None)
-        self.afl_email_label.setVisible(sport=="AFL")
-        self.afl_email.setVisible(sport=="AFL")
-        earliest=EARLIEST[sport]
-        self.start_year.setMinimum(earliest)
-        self.end_year.setMinimum(earliest)
-        self.start_year.setValue(max(earliest,date.today().year-4))
-        self.end_year.setValue(date.today().year)
-        self.archive_info.setText(
-            f"{len(years_in_cache)} provider seasons saved locally for {sport}. "
-            f"Available range: {earliest}–{date.today().year}. {GRAIN[sport]}.")
-        self.refresh_views()
+    def _build_downloads(self):
+        layout = self.page_layouts['downloads']
+        self._heading(layout, 'DATA MANAGER', 'Build your sporting library.', 'Downloads save completed chunks immediately. Resume skips completed seasons; update latest refreshes the newest available season.')
+        self.provider = QComboBox()
+        for key, provider in PROVIDERS.items():
+            self.provider.addItem(provider.meta.name, key)
+        self.provider.currentIndexChanged.connect(self._provider_changed)
+        layout.addWidget(self.provider)
+        self.provider_note = label('', 'muted', True)
+        self.provider_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.provider_note)
+        row = QHBoxLayout()
+        row.addWidget(button('Discover available seasons', self._discover_seasons))
+        self.range_start, self.range_end = QComboBox(), QComboBox()
+        row.addWidget(self.range_start, 1)
+        row.addWidget(label('to', 'muted'))
+        row.addWidget(self.range_end, 1)
+        layout.addLayout(row)
+        self.competition = QComboBox()
+        self.competition.setPlaceholderText('Discover competitions from the football source')
+        competition_row = QHBoxLayout()
+        competition_row.addWidget(self.competition, 1)
+        self.competition_button = button('Download competition', lambda: self._start_download('competition'))
+        competition_row.addWidget(self.competition_button)
+        layout.addLayout(competition_row)
+        row = QHBoxLayout()
+        self.download_all = button('Load all available years', lambda: self._start_download('all'), True)
+        self.download_range = button('Download selected range', lambda: self._start_download('range'))
+        self.download_latest = button('Update latest', lambda: self._start_download('latest'))
+        row.addWidget(self.download_all)
+        row.addWidget(self.download_range)
+        row.addWidget(self.download_latest)
+        layout.addLayout(row)
+        row = QHBoxLayout()
+        row.addWidget(button('Resume interrupted download', lambda: self._start_download('all')))
+        self.cancel_button = button('Cancel download', self._cancel_download)
+        self.cancel_button.setEnabled(False)
+        row.addWidget(self.cancel_button)
+        row.addStretch()
+        layout.addLayout(row)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        self.progress_text = label('Select a source, review its terms, then discover seasons.', 'muted', True)
+        layout.addWidget(self.progress_text)
+        layout.addWidget(label('Downloaded coverage', 'section'))
+        self.coverage_table = self._table(220)
+        layout.addWidget(self.coverage_table)
+        layout.addWidget(button('Remove selected downloaded season…', self._remove_season))
+        self.storage_note = label('', 'muted', True)
+        layout.addWidget(self.storage_note)
+        layout.addStretch()
+        self._provider_changed()
 
-    def _set_metric_items(self):
-        df=self.data[self.current_sport]
-        old=self.metric_combo.currentText()
-        numeric = [col for col in df.columns
-                   if col not in ("season","date","player_id")
-                   and pd.api.types.is_numeric_dtype(df[col])
-                   and df[col].notna().any()]
-        preferred = ["rating"]+[m for m in SPORTS[self.current_sport]["metrics"] if m in numeric]
-        ordered=list(dict.fromkeys([m for m in preferred if m in numeric]+sorted(numeric)))
-        self.metric_combo.blockSignals(True)
-        self.metric_combo.clear()
-        self.metric_combo.addItems(ordered)
-        self.metric_combo.setCurrentText(old if old in ordered else ("rating" if "rating" in ordered else ordered[0] if ordered else ""))
-        self.metric_combo.blockSignals(False)
+    def _build_settings(self):
+        layout = self.page_layouts['settings']
+        self._heading(layout, 'PREFERENCES', 'A workspace that works for you.', 'Data lives on this computer. Network access is used for downloads and permitted portraits.')
+        frame, inner = panel()
+        self.offline = QCheckBox('Offline mode — use only downloaded records and cached portraits')
+        self.offline.setChecked(self.settings.value('offline', False, type=bool))
+        self.offline.toggled.connect(self._offline_changed)
+        inner.addWidget(self.offline)
+        self.demo_check = QCheckBox('Demonstration mode — clearly labelled fictional data, separate from archive')
+        self.demo_check.toggled.connect(self._demo_changed)
+        inner.addWidget(self.demo_check)
+        inner.addWidget(label('Demonstration records are never added to your historical database or labelled as real players.', 'muted', True))
+        inner.addWidget(label('Squiggle contact email', 'section'))
+        self.contact_email = QLineEdit(str(self.archive.setting('contact_email', '')))
+        self.contact_email.setPlaceholderText('Email required by the AFL team-results provider')
+        inner.addWidget(self.contact_email)
+        inner.addWidget(button('Save provider contact', self._save_contact))
+        inner.addWidget(label('This address is stored in your local archive and sent to Squiggle in API request headers.', 'muted', True))
+        layout.addWidget(frame)
+        frame, inner = panel()
+        inner.addWidget(label('Archive storage', 'section'))
+        self.storage_path_label = label(str(getattr(self.archive, 'path', 'Local user data')), 'muted', True)
+        self.storage_path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        inner.addWidget(self.storage_path_label)
+        inner.addWidget(button('Export coverage manifest', self._export_manifest))
+        inner.addWidget(label('To reclaim space, back up the archive and remove unwanted data using a SQLite tool while GameSense is closed. No record deletion occurs automatically.', 'muted', True))
+        layout.addWidget(frame)
+        layout.addStretch()
 
-    def current(self):
-        df=self.data[self.current_sport]
-        season=self.season.currentText()
-        return df if not season or season=="All seasons" else df.loc[df["season"].astype(str)==season]
+    def _build_about(self):
+        layout = self.page_layouts['about']
+        self._heading(layout, 'GAMESENSE / 0.6.0', 'Statistics deserve context.', 'An independent native desktop application for football, basketball, Australian football and Formula 1.')
+        for provider in PROVIDERS.values():
+            frame, inner = panel()
+            inner.addWidget(label(provider.meta.name, 'section'))
+            inner.addWidget(label(self._provider_description(provider), 'muted', True))
+            layout.addWidget(frame)
+        frame, inner = panel()
+        inner.addWidget(label('Images, calculations and acknowledgements', 'section'))
+        inner.addWidget(label('Photographs: Wikimedia Commons, with the individual author, licence and source stored alongside each cached image. Unverified images use original silhouette artwork. Team logos are not bundled. Charts use Matplotlib and native Qt. Statistics use Pandas and NumPy; storage uses SQLite. Rate metrics are not summed. Full technical notes and AI assistance disclosure are included in the project documentation.', 'muted', True))
+        layout.addWidget(frame)
+        layout.addStretch()
 
-    def refresh_views(self):
-        if not hasattr(self,"rank_table"):
+    def navigate(self, route):
+        self.route = route
+        self.stack.setCurrentWidget(self.pages[route])
+        for key, btn in self.nav_buttons.items():
+            btn.setChecked(key == route)
+        self.breadcrumb.setText('WORKSPACE / ' + self.nav_buttons[route].text().upper())
+        self.refresh()
+
+    def open_sport(self, sport):
+        self.sport.setCurrentText(sport)
+        self.navigate('dashboard')
+
+    def _change_sport(self, *_):
+        if not hasattr(self, 'season'):
             return
-        df=self.current()
-        summary_data=summary(df,self.current_sport)
-        values=[summary_data["records"],summary_data["competitors"],summary_data["teams"],
-                summary_data["seasons"],summary_data["average_rating"]]
-        for widget,value in zip(self.kpi_widgets,values):
-            widget.setText("—" if value is None or pd.isna(value) else str(value))
-        competitors=sorted(df["competitor"].dropna().astype(str).unique())
-        prev=(self.a.currentText(),self.b.currentText())
-        for combo,old,idx in [(self.a,prev[0],0),(self.b,prev[1],1)]:
+        sport = self.sport_name
+        accent = SPORT_STYLES[sport][0]
+        self.setStyleSheet(BASE_STYLE.replace('ACCENT', accent))
+        self.banner.set_sport(sport)
+        seasons = self.archive.seasons(sport)
+        if self.demo:
+            from .demo import demo_data
+            seasons = sorted(demo_data(sport)['season'].astype(str).unique(), reverse=True)
+        self.season.blockSignals(True)
+        self.season.clear()
+        self.season.addItems(['All downloaded seasons'] + list(map(str, seasons)))
+        self.season.blockSignals(False)
+        self.page_offset = 0
+        self.search.clear()
+        self._update_identities()
+        self.refresh()
+
+    def _selected_season(self):
+        return None if self.season.currentIndex() <= 0 else self.season.currentText()
+
+    def _season_changed(self, *_):
+        self.page_offset = 0
+        self.refresh()
+
+    def _query(self, competitor_id=None, team=None, limit=5000, offset=0):
+        if self.demo:
+            from .demo import demo_data
+            data, _ = clean_data(demo_data(self.sport_name), self.sport_name)
+            data['competitor_id'] = 'demo:' + data['competitor']
+            data['source'] = 'FICTIONAL DEMONSTRATION'
+            data['record_type'] = 'demo_event'
+            if self._selected_season():
+                data = data[data['season'].astype(str) == self._selected_season()]
+            if competitor_id:
+                data = data[data['competitor_id'] == competitor_id]
+            if team:
+                data = data[data['team'] == team]
+            return data.iloc[offset:offset+limit].copy()
+        return self.archive.query(self.sport_name, season=self._selected_season(), competitor_id=competitor_id, team=team, limit=limit, offset=offset)
+
+    def _update_identities(self):
+        text = self.search.text().strip()
+        if self.demo:
+            data = self._query(limit=1000)
+            ids = data[['competitor_id', 'competitor', 'team']].drop_duplicates('competitor_id')
+            if text:
+                ids = ids[ids['competitor'].str.contains(text, case=False, regex=False)]
+        else:
+            first = str(self.era_start.value()) if hasattr(self, 'era_start') and self.era_start.value() else None
+            last = str(self.era_end.value()) + '\uffff' if hasattr(self, 'era_end') and self.era_end.value() else None
+            ids = self.archive.search(self.sport_name, text=text, limit=1000, first_season=first, last_season=last)
+        if hasattr(self, 'favourites_only') and self.favourites_only.isChecked() and not ids.empty:
+            ids = ids[ids['competitor_id'].astype(str).isin(self._favourites())]
+        self.identities = ids
+        for combo, fallback in [(self.athlete, 0), (self.compare_a, 0), (self.compare_b, 1)]:
+            old = combo.currentData()
             combo.blockSignals(True)
             combo.clear()
-            combo.addItems(competitors)
-            if old in competitors: combo.setCurrentText(old)
-            elif competitors: combo.setCurrentIndex(min(idx,len(competitors)-1))
+            for _, row in ids.iterrows():
+                kind = ' [team]' if row.get('entity_type') == 'team' else ''
+                combo.addItem(str(row['competitor']) + kind + ' · ' + str(row.get('team', '')), str(row['competitor_id']))
+            index = combo.findData(old)
+            combo.setCurrentIndex(index if index >= 0 else min(fallback, len(ids)-1))
             combo.blockSignals(False)
-        self.fill_rankings()
-        self.fill_table(self.raw_table,df.sort_values("date",ascending=False).head(800))
-        self.refresh_graphs()
 
-    def refresh_graphs(self):
-        if not hasattr(self,"trend"):
+    def _search_changed(self):
+        self._update_identities()
+        if self.search.text().strip() and self.route != 'profiles':
+            self.navigate('profiles')
+        elif self.route == 'profiles':
+            self._load_profile()
+
+    def _identity_filters_changed(self, *_):
+        if not hasattr(self, 'favourites_only') or not hasattr(self, 'compare_b'):
             return
-        df=self.current()
-        selected=list(dict.fromkeys(x for x in (self.a.currentText(),self.b.currentText()) if x))
-        metric=self.metric_combo.currentText()
-        self.trend.render(df,self.current_sport,selected,metric,"trend")
-        self.leaders.render(df,self.current_sport,selected,metric,"leaders")
-        self.comparison.render(df,self.current_sport,selected,metric,"compare")
-        self.breakdown.render(df,self.current_sport,selected,metric,"breakdown")
-        self.seasons_chart.render(self.data[self.current_sport],self.current_sport,selected,metric,"seasons")
-        self.sport_chart.render(df,self.current_sport,selected,metric,"sport")
-        self.quality_chart.render(df,self.current_sport,selected,metric,"quality")
-        form=", ".join(f"{p}: {recent_form(df,p) if recent_form(df,p) is not None else 'N/A'}"
-                       for p in selected)
-        kind = ", ".join(sorted(df["record_type"].dropna().astype(str).unique())) if "record_type" in df else "imported records"
-        self.insight.setText(
-            f"Selected: {', '.join(selected) or 'none'}     •     Recent custom rating: {form or 'N/A'}\n"
-            f"Data grain: {kind}    •    Source: {self.sources[self.current_sport]}\n"
-            "These ratings are GameSense indicators, not official athlete ratings. "
-            "One NBA season row is not an individual game."
-        )
-        ranks=self.extended_rankings(df)
-        compare=ranks[ranks["competitor"].isin(selected)] if not ranks.empty else pd.DataFrame()
-        if not compare.empty:
-            compare=compare.set_index("competitor").drop(columns=["team"],errors="ignore").T.reset_index().rename(columns={"index":"Statistic"})
-        self.fill_table(self.compare_table,compare.round(2) if not compare.empty else pd.DataFrame())
-        self.fill_rankings()
+        self._update_identities()
+        if self.route == 'profiles':
+            self._load_profile()
 
-    def extended_rankings(self,df):
-        """Show EVERY present numeric metric, not only the five core sport ratings."""
-        ranked=rankings(df,self.current_sport)
-        extras=[name for name in df.columns
-                if name not in ranked.columns and name not in
-                   ("season","date","player_id","team_id","date_is_marker")
-                and pd.api.types.is_numeric_dtype(df[name])]
-        if extras and not df.empty:
-            nba_seasons=(self.current_sport=="NBA" and "games" in df
-                         and "record_type" in df and
-                         df["record_type"].astype(str).str.contains("season",case=False).all())
-            if nba_seasons:
-                rows=[]
-                for person,part in df.groupby("competitor"):
-                    weights=pd.to_numeric(part["games"],errors="coerce").clip(lower=0)
-                    record={"competitor":person}
-                    for metric in extras:
-                        values=pd.to_numeric(part[metric],errors="coerce")
-                        keep=values.notna() & weights.notna() & (weights>0)
-                        denom=weights[keep].sum()
-                        record[metric]=(float((values[keep]*weights[keep]).sum()/denom)
-                                        if denom>0 else float("nan"))
-                    rows.append(record)
-                additional=pd.DataFrame(rows)
+    def refresh(self, *_):
+        if not hasattr(self, 'raw_table'):
+            return
+        sport = self.sport_name
+        route = self.route
+        if route == 'home':
+            for name, widget in self.home_counts.items():
+                stats = self.archive.stats(name)
+                widget.setText(f"{stats.get('records', 0):,} records · {stats.get('competitors', stats.get('identities', 0)):,} identities · {stats.get('seasons', 0)} seasons\nStored locally. Source coverage varies.")
+        elif route in {'dashboard', 'leaders', 'teams'}:
+            self.frame = self._query(limit=10000)
+            if route == 'dashboard':
+                stats = self.archive.stats(sport) if not self.demo else {'records':len(self.frame), 'competitors':self.frame['competitor'].nunique(), 'teams':self.frame['team'].nunique(), 'seasons':self.frame['season'].nunique()}
+                for widget, key in zip(self.stat_values, ['records','competitors','teams','seasons']):
+                    widget.setText(fmt(stats.get(key, stats.get('identities', 0) if key == 'competitors' else 0)))
+                sources = ', '.join(self.frame.get('source', self.frame.get('provider', pd.Series(dtype=str))).dropna().astype(str).unique())
+                self.coverage_note.setText(('FICTIONAL DEMONSTRATION MODE · ' if self.demo else 'REAL LOCAL ARCHIVE · ') + (sources or 'No records for this selection. Open Data Manager to download history.') + '\nCharts show up to 10,000 selected records; filter a season for a complete local cohort.')
+                self._set_metrics(self.dash_metric, self.frame)
+                self._plot_dashboard()
+                self._feature_cards(self.featured, self.identities.head(3))
+            elif route == 'leaders':
+                self._set_metrics(self.leader_metric, self.frame)
+                self._load_leaders()
             else:
-                additional=df.groupby("competitor")[extras].mean().reset_index()
-            ranked=ranked.merge(additional,on="competitor",how="left")
-        return ranked
+                old = self.team_select.currentText()
+                teams = sorted(self.frame.get('team', pd.Series(dtype=str)).dropna().astype(str).unique())
+                self.team_select.blockSignals(True)
+                self.team_select.clear()
+                self.team_select.addItems(teams)
+                if old in teams:
+                    self.team_select.setCurrentText(old)
+                self.team_select.blockSignals(False)
+                self._load_team()
+        elif route == 'profiles':
+            self._load_profile()
+        elif route == 'compare':
+            self._load_comparison()
+        elif route == 'explorer':
+            frame = self._query(limit=300, offset=self.page_offset)
+            front = [c for c in ['date','season','competitor','team','competition','event','record_kind'] + available_metrics(frame) if c in frame]
+            frame = frame[list(dict.fromkeys(front + list(frame.columns)))]
+            self._fill(self.raw_table, frame)
+            self.previous.setEnabled(self.page_offset > 0)
+            self.next_page.setEnabled(len(frame) == 300)
+            self.explorer_note.setText(f"Showing {len(frame):,} rows at offset {self.page_offset:,}. Double-click a row to open its identity. " + ('FICTIONAL DEMONSTRATION.' if self.demo else 'Only actual downloaded records are shown.'))
+        elif route == 'downloads':
+            coverage = self.archive.coverage(sport)
+            self._fill(self.coverage_table, pd.DataFrame(coverage))
+            path = Path(self.archive.path)
+            size = path.stat().st_size / (1024*1024) if path.exists() else 0
+            self.storage_note.setText(f'Archive: {path}\nDatabase: {size:,.1f} MB. Completed records are available without internet.')
 
-    def fill_rankings(self):
-        if not hasattr(self,"rank_table"):
+    def _set_metrics(self, combo, frame):
+        previous = combo.currentText()
+        metrics = available_metrics(frame)
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(metrics)
+        preferred = {'F1':'points','NBA':'points','Soccer':'goals','AFL':'goals'}[self.sport_name]
+        if previous in metrics:
+            combo.setCurrentText(previous)
+        elif preferred in metrics:
+            combo.setCurrentText(preferred)
+        combo.blockSignals(False)
+
+    def _plot_dashboard(self, *_):
+        self.dash_chart.plot(self.frame, self.sport_name, metric=self.dash_metric.currentText() or None, mode=self.dash_mode.currentText())
+
+    def _clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().hide()
+                item.widget().deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
+
+    def _feature_cards(self, layout, identities, grid=False):
+        self._clear_layout(layout)
+        for index, (_, identity) in enumerate(identities.iterrows()):
+            frame, inner = panel()
+            frame.setMinimumHeight(154)
+            row = QHBoxLayout()
+            portrait = PortraitWidget(size=58)
+            is_team = identity.get('entity_type') == 'team'
+            if not is_team:
+                portrait.set_athlete(str(identity['competitor_id']), str(identity['competitor']), self.sport_name, online=self._online() and not self.demo)
+            row.addWidget(portrait)
+            names = QVBoxLayout()
+            names.addWidget(label(str(identity['competitor']), 'section', True))
+            names.addWidget(label(str(identity.get('team', '')), 'muted', True))
+            row.addLayout(names, 1)
+            inner.addLayout(row)
+            inner.addWidget(button('View team records' if is_team else 'Explore career  →', lambda checked=False, cid=str(identity['competitor_id']): self._open_identity(cid)))
+            if grid:
+                layout.addWidget(frame, index//3, index%3)
+            else:
+                layout.addWidget(frame)
+
+    def _open_identity(self, identity):
+        index = self.athlete.findData(identity)
+        if index < 0:
+            self.search.clear()
+            self._update_identities()
+            index = self.athlete.findData(identity)
+        if index >= 0:
+            self.athlete.setCurrentIndex(index)
+        self.navigate('profiles')
+
+    def _open_table_identity(self, table, index):
+        frame = table.model().frame
+        if index.row() < len(frame) and 'competitor_id' in frame:
+            self._open_identity(str(frame.iloc[index.row()]['competitor_id']))
+
+    def _online(self):
+        return not self.offline.isChecked() if hasattr(self, 'offline') else not self.settings.value('offline', False, type=bool)
+
+    def _load_profile(self, *_):
+        if not hasattr(self, 'profile_chart'):
             return
-        df=self.current()
-        rank=self.extended_rankings(df)
-        term=self.search.text().strip().casefold()
-        if term and not rank.empty:
-            rank=rank[rank["competitor"].astype(str).str.casefold().str.contains(term,regex=False)]
-        metric=self.metric_combo.currentText()
-        if metric in rank:
-            lower_better = self.current_sport == "F1" and metric in {
-                "finish_position", "grid_position", "qualifying_position"
-            }
-            rank=rank.sort_values(metric,ascending=lower_better,na_position="last")
-        self.fill_table(self.rank_table,rank.round(2).head(700))
+        cid = self.athlete.currentData()
+        self.profile_frame = self._query(competitor_id=cid, limit=50000) if cid else pd.DataFrame()
+        data = self.profile_frame
+        identity = self.identities[self.identities['competitor_id'].astype(str) == str(cid)] if not self.identities.empty else pd.DataFrame()
+        name = str(identity.iloc[0]['competitor']) if not identity.empty else 'No matching identity in this archive'
+        is_team = not identity.empty and identity.iloc[0].get('entity_type') == 'team'
+        self.profile_name.setText(name)
+        self.image_credit.setText('Original placeholder · no verified portrait.' if is_team or not cid else 'Loading cached portrait and verified attribution…')
+        self.portrait.set_athlete(str(cid or 'empty'), name if cid else '', self.sport_name, online=self._online() and bool(cid) and not self.demo and not is_team)
+        teams = ', '.join(data.get('team', pd.Series(dtype=str)).dropna().astype(str).unique())
+        years = sorted(data.get('season', pd.Series(dtype=str)).dropna().astype(str).unique())
+        self.profile_meta.setText(self.sport_name + (' · Team record' if is_team else ' · Athlete / driver') + '\n' + (teams or 'No records in the selected season') + ('\n' + years[0] + ' — ' + years[-1] if years else ''))
+        details = []
+        for field in ('position','nationality'):
+            if field in data:
+                values = data[field].dropna().astype(str).unique()
+                if len(values):
+                    details.append(', '.join(values[:3]))
+        if details:
+            self.profile_meta.setText(self.profile_meta.text() + '\n' + ' · '.join(details))
+        self.profile_summary.setText(f"{len(data):,} local records  /  {len(years)} seasons" if not data.empty else 'Download the relevant provider archive to retrieve missing history.')
+        hero_keys = {'F1':['wins','podiums','points'],'NBA':['points','rebounds','assists'],'Soccer':['goals','assists','xg'],'AFL':['wins','goals','points']}[self.sport_name]
+        for (value, caption), metric in zip(self.hero_metrics, hero_keys):
+            values = metric_summary(data, metric)
+            value.setText(fmt(values['total']))
+            caption.setText(metric.replace('_',' ').upper() + ' · LOCAL TOTAL')
+        self._set_metrics(self.profile_metric, data)
+        metrics = available_metrics(data)
+        self._fill(self.history_table, season_history(data, metrics[:16]))
+        rows = [{'statistic':m, **metric_summary(data,m)} for m in metrics]
+        self._fill(self.advanced_table, pd.DataFrame(rows))
+        self.profile_sources.setText('\n\n'.join(f'{k}: ' + ', '.join(data[k].dropna().astype(str).unique()[:20]) for k in ['provider','source','source_url','license','record_type','record_kind','entity_type'] if k in data) + '\n\nProfile limit: 50,000 stored rows. Seasons without records are not assumed to have zero performance. Positions and percentages use averages; counting metrics use totals. Season rows require games played for per-game values.')
+        self.fav_button.setText('Saved favourite' if str(cid) in self._favourites() else 'Save favourite')
+        self._plot_profile()
 
-    @staticmethod
-    def fill_table(table,df):
-        table.setUpdatesEnabled(False)
-        table.setSortingEnabled(False)
-        table.clear()
-        table.setRowCount(len(df))
-        table.setColumnCount(len(df.columns))
-        table.setHorizontalHeaderLabels([str(x).replace("_"," ").title() for x in df.columns])
-        for i,row in enumerate(df.itertuples(index=False,name=None)):
-            for j,v in enumerate(row):
-                text="—" if pd.isna(v) else str(v)
-                item=QTableWidgetItem(text)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                table.setItem(i,j,item)
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        table.horizontalHeader().setStretchLastSection(True)
-        table.setSortingEnabled(True)
-        table.setUpdatesEnabled(True)
+    def _plot_profile(self, *_):
+        if not hasattr(self, 'profile_chart'):
+            return
+        metric = self.profile_metric.currentText()
+        self.profile_chart.plot(self.profile_frame, self.sport_name, metric=metric or None, mode=self.profile_mode.currentText())
+        stats = metric_summary(self.profile_frame, metric)
+        self.profile_detail.setText(f"{metric.replace('_',' ').title() or 'Statistic'} · Total {fmt(stats['total'])} · Average per recorded row {fmt(stats['average'])} · Per game {fmt(stats['per_game'])} · Best {fmt(stats['best'])} · {stats['count']} observations. Partial downloaded history is not a complete career.")
 
-    def import_file(self):
-        path,_=QFileDialog.getOpenFileName(self,"Import sports data","","Sports data (*.csv *.xlsx *.xls *.json)")
+    def _favourites(self):
+        value = self.settings.value('favourites', '[]')
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return []
+
+    def _toggle_favourite(self):
+        cid = self.athlete.currentData()
+        if cid is None:
+            return
+        favourites = self._favourites()
+        if str(cid) in favourites:
+            favourites.remove(str(cid))
+        else:
+            favourites.append(str(cid))
+        self.settings.setValue('favourites', json.dumps(favourites))
+        self.fav_button.setText('Saved favourite' if str(cid) in favourites else 'Save favourite')
+
+    def _load_comparison(self, *_):
+        if not hasattr(self, 'compare_chart'):
+            return
+        frames = []
+        for combo, portrait in zip((self.compare_a, self.compare_b), self.compare_portraits):
+            cid = combo.currentData()
+            data = self._query(competitor_id=cid, limit=25000) if cid else pd.DataFrame()
+            if not data.empty:
+                frames.append(data)
+            name = str(data['competitor'].iloc[0]) if not data.empty else ''
+            portrait.set_athlete(str(cid or 'empty'), name, self.sport_name, online=self._online() and bool(cid) and not self.demo)
+        self.comparison_frame = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        if 'record_id' in self.comparison_frame:
+            self.comparison_frame = self.comparison_frame.drop_duplicates('record_id')
+        self._set_metrics(self.compare_metric, self.comparison_frame)
+        self._plot_comparison()
+
+    def _plot_comparison(self, *_):
+        frame = getattr(self, 'comparison_frame', pd.DataFrame())
+        metric = self.compare_metric.currentText()
+        people = list(frame.get('competitor', pd.Series(dtype=str)).dropna().unique())
+        self.compare_chart.plot(frame, self.sport_name, people=people, metric=metric or None, mode=self.compare_mode.currentText())
+        rows = []
+        for cid, group in frame.groupby('competitor_id') if not frame.empty and 'competitor_id' in frame else []:
+            rows.append({'competitor':group['competitor'].iloc[-1], **metric_summary(group, metric)})
+        self._fill(self.compare_table, pd.DataFrame(rows))
+
+    def _load_team(self, *_):
+        team = self.team_select.currentText()
+        data = self._query(team=team, limit=10000) if team else pd.DataFrame()
+        identities = data.drop_duplicates('competitor_id') if 'competitor_id' in data else pd.DataFrame()
+        if not identities.empty and 'entity_type' in identities:
+            athletes = identities[identities['entity_type'] != 'team']
+        else:
+            athletes = identities
+        self.team_note.setText(f'{team} · {len(data):,} downloaded records · {len(athletes):,} recorded athletes. ' + ('This source contains team match results only; no player statistics are inferred.' if not data.empty and athletes.empty else 'Cards show up to 12 athletes from this selection.'))
+        self._feature_cards(self.roster_grid, athletes.head(12), grid=True)
+        self._fill(self.team_table, season_history(data, available_metrics(data)[:12]))
+
+    def _load_leaders(self, *_):
+        if not hasattr(self, 'leader_table'):
+            return
+        metric = self.leader_metric.currentText()
+        self.leader_frame = leaderboard(self.frame, metric, self.leader_total.isChecked())
+        display = self.leader_frame.head(500).copy()
+        display.insert(0, 'rank', range(1, len(display)+1))
+        columns = [c for c in ['rank','competitor','team',metric,'records','competitor_id'] if c in display]
+        self._fill(self.leader_table, display[columns])
+        self._feature_cards(self.leaders_featured, self.leader_frame.head(3))
+
+    def _turn_page(self, direction):
+        self.page_offset = max(0, self.page_offset + direction*300)
+        self.refresh()
+
+    def _provider_description(self, provider):
+        meta = provider.meta
+        return '\n'.join(str(getattr(meta, key, '')) for key in ['description','scope','license','terms_url'] if getattr(meta, key, ''))
+
+    def _provider_changed(self, *_):
+        if not hasattr(self, 'provider_note'):
+            return
+        provider = PROVIDERS[self.provider.currentData()]
+        self.provider_note.setText(self._provider_description(provider))
+        self.download_seasons = []
+        if hasattr(self, 'range_start'):
+            self.range_start.clear()
+            self.range_end.clear()
+        if hasattr(self, 'competition'):
+            self.competition.clear()
+            self.competition.setVisible(hasattr(provider, 'competitions'))
+            self.competition_button.setVisible(hasattr(provider, 'competitions'))
+
+    def _job(self, key, fn, done, failed=None):
+        if key in self.jobs:
+            return
+        job = Job(fn)
+        self.jobs[key] = job
+        def complete(result):
+            self.jobs.pop(key, None)
+            done(result)
+        def failure(message):
+            self.jobs.pop(key, None)
+            (failed or self._job_failed)(message)
+        job.signals.done.connect(complete)
+        job.signals.failed.connect(failure)
+        job.signals.progress.connect(self._progress_message)
+        self.pool.start(job)
+
+    def _client(self):
+        return HttpClient(cache_dir=Path(self.archive.path).parent / 'http', cancel=self.cancel_event)
+
+    def _discover_seasons(self):
+        if not self._online():
+            self.progress_text.setText('Offline mode is enabled. Change Preferences before discovering providers.')
+            return
+        if self.download_running:
+            return
+        self.cancel_event.clear()
+        provider = PROVIDERS[self.provider.currentData()]
+        self.progress_text.setText('Discovering available seasons…')
+        self.provider.setEnabled(False)
+        def discover(progress):
+            client = self._client()
+            seasons = provider.available_seasons(client)
+            competitions = provider.competitions(client) if hasattr(provider, 'competitions') else []
+            return seasons, competitions
+        self._job('discover', discover, self._seasons_ready)
+
+    def _seasons_ready(self, seasons):
+        self.provider.setEnabled(True)
+        seasons, competitions = seasons
+        self.competition.clear()
+        for item in sorted(competitions, key=lambda r:(r.get('competition_name',''), r.get('season_name',''))):
+            self.competition.addItem(str(item.get('competition_name', '')) + ' · ' + str(item.get('season_name','')), item)
+        self.download_seasons = sorted(map(str, seasons))
+        for combo in (self.range_start, self.range_end):
+            combo.clear()
+            combo.addItems(self.download_seasons)
+        if self.download_seasons:
+            self.range_end.setCurrentIndex(len(self.download_seasons)-1)
+        self.progress_text.setText(f'{len(self.download_seasons)} season / competition entries are available from this provider. Review the coverage and usage terms above.')
+
+    def _start_download(self, mode):
+        if self.download_running:
+            return
+        if not self._online():
+            self.progress_text.setText('Offline mode is enabled. Change Preferences to download history.')
+            return
+        provider = PROVIDERS[self.provider.currentData()]
+        competition = self.competition.currentData() if mode == 'competition' else None
+        if mode == 'competition' and not competition:
+            self._discover_seasons()
+            return
+        if mode == 'range' and not self.download_seasons:
+            self._discover_seasons()
+            return
+        selected = list(self.download_seasons)
+        if mode == 'range':
+            a, b = sorted([self.range_start.currentIndex(), self.range_end.currentIndex()])
+            selected = selected[a:b+1]
+        self.cancel_event.clear()
+        self.download_running = True
+        self.cancel_button.setEnabled(True)
+        self.provider.setEnabled(False)
+        self.progress.setRange(0, 0)
+        self.progress_text.setText('Connecting to provider. Downloaded chunks will be committed immediately…')
+        def run(progress):
+            client = self._client()
+            def report(*parts, **kwargs):
+                progress(' · '.join(str(p) for p in parts) + (' ' + str(kwargs) if kwargs else ''))
+            if competition:
+                return provider.download_competition(self.archive, competition['competition_id'], competition['season_id'], client=client, cancel=self.cancel_event, progress=report)
+            seasons = selected or sorted(map(str, provider.available_seasons(client)))
+            if mode == 'latest':
+                seasons = seasons[-1:]
+            count = provider.download(self.archive, seasons, client=client, cancel=self.cancel_event, progress=report, force=mode == 'latest')
+            return count
+        self._job('download', run, self._download_done, self._download_failed)
+
+    def _progress_message(self, message):
+        import re
+        counts = re.match(r'^(\d+) · (\d+) ·', message)
+        if counts and int(counts[2]) > 0:
+            self.progress.setRange(0, int(counts[2]))
+            self.progress.setValue(int(counts[1]))
+        self.progress_text.setText(message)
+        self.status.setText(message)
+
+    def _download_done(self, count):
+        self.download_running = False
+        self.provider.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+        self.progress.setRange(0, 100)
+        self.progress.setValue(100)
+        self.progress_text.setText(f'Download finished: {count} records processed. Completed seasons stay cached; choose Update latest to refresh a season.')
+        self.status.setText(self.progress_text.text())
+        self._change_sport()
+
+    def _remove_season(self):
+        if self.download_running:
+            self.status.setText('Cancel or finish the current download before managing stored seasons.')
+            return
+        selected = self.coverage_table.selectionModel().selectedRows() if self.coverage_table.selectionModel() else []
+        if not selected:
+            self.status.setText('Select a season in the coverage table first.')
+            return
+        record = self.coverage_table.model().frame.iloc[selected[0].row()]
+        answer = QMessageBox.question(self, 'Remove downloaded season', f"Remove {record['provider']} / {record['season']} from this computer? You can download it again later.")
+        if answer == QMessageBox.StandardButton.Yes:
+            self.archive.delete_season(str(record['sport']), str(record['season']), str(record['provider']))
+            self._change_sport()
+            self.status.setText('Selected downloaded season removed locally.')
+
+    def _download_failed(self, message):
+        self.download_running = False
+        self.provider.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress_text.setText(('Download cancelled. ' if self.cancel_event.is_set() else 'Download stopped. ') + message + '\nCompleted chunks are saved. Resume skips completed seasons.')
+        self.status.setText(self.progress_text.text())
+        self._change_sport()
+
+    def _job_failed(self, message):
+        if not self.download_running:
+            self.provider.setEnabled(True)
+        self.progress_text.setText(message)
+        self.status.setText(message)
+
+    def _cancel_download(self):
+        self.cancel_event.set()
+        self.progress_text.setText('Cancelling after the current request; completed chunks remain in your archive…')
+
+    def _save_contact(self):
+        import re
+        contact = self.contact_email.text().strip()
+        if contact and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', contact):
+            self.status.setText('Enter a valid contact email, or leave the field blank.')
+            return
+        self.archive.set_setting('contact_email', contact)
+        self.status.setText('Provider contact saved locally.')
+
+    def _offline_changed(self, enabled):
+        self.settings.setValue('offline', enabled)
+        if enabled:
+            self.cancel_event.set()
+        self.refresh()
+
+    def _demo_changed(self, enabled):
+        self.demo = enabled
+        self.setWindowTitle('GameSense — FICTIONAL DEMONSTRATION' if enabled else 'GameSense — Sports Intelligence')
+        self._change_sport()
+
+    def _import_file(self):
+        path, _ = QFileDialog.getOpenFileName(self, 'Import source-attributed sporting records', '', 'Data files (*.csv *.xlsx *.json)')
         if not path:
             return
-        try:
-            if path.lower().endswith(".csv"):
-                raw=pd.read_csv(path)
-            elif path.lower().endswith(".json"):
-                raw=pd.read_json(path)
-            else:
-                raw=pd.read_excel(path)
-            sport=self.current_sport
-            raw, import_notes = prepare_import(raw,sport)
-            cleaned,report=clean_data(raw,sport)
-            if cleaned.empty: raise ValueError("No valid records after cleaning.")
-            self.data[sport]=cleaned
-            self.sources[sport]=f"USER IMPORT · {Path(path).name} (licensing and provenance supplied by user)"
-            self.is_demo[sport]=False
-            storage.save(sport,cleaned,self.sources[sport])
-            self.change_sport(sport)
-            QMessageBox.information(self,"Data imported","Imported "+str(report["valid_rows"])+" valid records.\n"
-                                    +str(report["duplicates_removed"])+" duplicates removed.\n\n"
-                                    +"\n".join(import_notes))
-        except Exception as exc:
-            QMessageBox.critical(self,"Import failed",str(exc))
-
-    def open_historical_library(self):
-        """Make real-data access discoverable from every sport dashboard."""
-        self.change_page(3)
-        self.start_year.setValue(EARLIEST[self.current_sport])
-        self.end_year.setValue(date.today().year)
-        self.archive_info.setText(
-            f"READY: {self.current_sport} has available provider seasons from "
-            f"{EARLIEST[self.current_sport]} onwards. Click LOAD ALL AVAILABLE YEARS "
-            "to retrieve and cache all seasons the provider actually returns. "
-            "Downloads run in the background and can be resumed."
-        )
-
-    def load_all_years(self):
-        """One action requests the entire historical provider range, not five years."""
-        if self._thread is not None:
+        if self.demo:
+            self.status.setText('Disable demonstration mode before importing real data.')
             return
-        sport=self.current_sport
-        start=EARLIEST[sport]
-        end=date.today().year
-        cached=cache_years(self.data[sport],sport) if not self.is_demo[sport] else set()
-        remaining=plan_years(sport,start,end,cached=cached)
-        if not remaining:
-            QMessageBox.information(self,"All downloaded",
-                                    "All supported seasons are already stored locally.")
-            return
-        answer=QMessageBox.question(
-            self, "Build real historical library",
-            f"Download all obtainable {sport} history from {start} through {end}?\n\n"
-            f"{len(remaining)} seasons are not yet cached or require a current-season refresh.\n\n"
-            f"Coverage: {GRAIN[sport]}.\n\n"
-            "This may make many requests and some years may be unavailable or blocked. "
-            "Completed years are saved immediately; you can stop and resume safely. "
-            "Fictional demo records will be replaced by real downloaded results.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if answer == QMessageBox.StandardButton.Yes:
-            self._start_download(sorted(remaining,reverse=True))
+        sport = self.sport_name
+        def run(progress):
+            suffix = Path(path).suffix.lower()
+            raw = pd.read_csv(path) if suffix == '.csv' else pd.read_json(path) if suffix == '.json' else pd.read_excel(path)
+            prepared, notes = prepare_import(raw, sport)
+            clean, report = clean_data(prepared, sport)
+            if notes:
+                report['normalization'] = '; '.join(notes)
+            if clean.empty:
+                raise ValueError('No valid records remain after cleaning.')
+            self.archive.import_frame(sport, clean, source='User import: ' + Path(path).name)
+            return report
+        self._job('import', run, lambda report: (self.status.setText('Import saved: ' + str(report)), self._change_sport()))
 
-    def download_season(self):
-        if self._thread is not None:
-            return
-        sport=self.current_sport
-        start,end=self.start_year.value(),self.end_year.value()
-        try:
-            cached=cache_years(self.data[sport],sport) if not self.is_demo[sport] else set()
-            years=plan_years(sport,start,end,cached=cached)
-        except ValueError as exc:
-            QMessageBox.warning(self,"Invalid historical range",str(exc))
-            return
-        if not years:
-            QMessageBox.information(self,"Already cached",
-                                    "These seasons are already stored locally. "
-                                    "Choose additional years or refresh the current season.")
-            return
-        self._start_download(sorted(years,reverse=True))
-
-    def _start_download(self,years):
-        if self._thread is not None or not years:
-            return
-        sport=self.current_sport
-        contact=self.afl_email.text().strip() if sport=="AFL" else None
-        if sport=="AFL" and (not contact or "@" not in contact or "." not in contact):
-            QMessageBox.information(
-                self,"Squiggle contact email required",
-                "Squiggle requires an identifying contact email in API requests. "
-                "Enter yours in Data Studio; it is not saved by GameSense. "
-                "Squiggle supplies AFL TEAM match results only, not player statistics.")
-            self.change_page(3)
-            self.afl_email.setFocus()
-            return
-        self._job_sport=sport
-        self._job_loaded=0
-        self._job_summary=""
-        self.download_btn.setEnabled(False)
-        self.all_years_btn.setEnabled(False)
-        self.real_btn.setEnabled(False)
-        self.import_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(True)
-        self.download_btn.setText("Downloading history...")
-        self.archive_progress.setValue(0)
-        self.archive_info.setText(f"Fetching {len(years)} uncached {sport} seasons.")
-        self._thread=QThread(self)
-        self._worker=DownloadWorker(sport,years,contact)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.season_ready.connect(self.receive_download)
-        self._worker.progress.connect(self._download_progress)
-        self._worker.failed.connect(self._download_error)
-        self._worker.completed.connect(self._download_summary)
-        self._worker.done.connect(self._thread.quit)
-        self._worker.done.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._download_complete)
-        self._thread.finished.connect(self._thread.deleteLater)
-        self._thread.start()
-
-    def cancel_download(self):
-        if self._thread is not None:
-            self._worker.cancel()
-            self.cancel_btn.setEnabled(False)
-            self.archive_info.setText(
-                "Stop requested. The current provider request may finish first; "
-                "completed years are already saved.")
-
-    def _download_progress(self,message,completed,total):
-        if self._job_sport:
-            self.statusBar().showMessage(message)
-            self.archive_progress.setValue(
-                min(100,int(completed*100/max(total,1))))
-            self.archive_info.setText(
-                message + f" — {self._job_loaded} successful seasons cached. "
-                "You can close this archive task using Stop.")
-
-    def _download_error(self,message):
-        self._job_summary=message
-
-    def _download_summary(self,message):
-        self._job_summary=message
-
-    def receive_download(self,df,source):
-        """Persist *each* successful year immediately for crash-safe resuming."""
-        sport=self._job_sport
-        if not sport:
-            return
-        existing=None if self.is_demo[sport] else self.data[sport]
-        try:
-            merged=merge_season(existing,df,sport,source)
-            self.data[sport]=merged
-            self.is_demo[sport]=False
-            all_sources=merged.get("data_source",pd.Series(dtype=str)).dropna().astype(str)
-            providers=sorted(set(value.split(" · ")[0] for value in all_sources))
-            self.sources[sport]=" + ".join(providers)+" · locally cached real / imported data"
-            storage.save(sport,merged,self.sources[sport])
-            self._job_loaded+=1
-            # Show genuine players immediately, without waiting for decades of
-            # downloads to finish. Refresh at most once per five saved seasons.
-            if self.current_sport == sport and (
-                    self._job_loaded == 1 or self._job_loaded % 5 == 0):
-                self.change_sport(sport)
-                self.season.setCurrentIndex(0)
-            self.archive_info.setText(
-                f"Saved {self._job_loaded} new {sport} seasons. "
-                f"Current local archive: {len(merged):,} records, "
-                f"{len(cache_years(merged,sport))} provider seasons.")
-        except Exception as exc:
-            self._job_summary=f"Could not save {sport} data: {exc}"
-            self.cancel_download()
-
-    def _download_complete(self):
-        sport=self._job_sport
-        saved=self._job_loaded
-        message=self._job_summary
-        self._thread=None
-        self._worker=None
-        self._job_sport=None
-        self.download_btn.setText("↓  Load selected years")
-        self.download_btn.setEnabled(True)
-        self.all_years_btn.setEnabled(True)
-        self.real_btn.setEnabled(True)
-        self.import_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
-        if sport:
-            if self.current_sport==sport:
-                self.change_sport(sport)
-                self.season.setCurrentIndex(0)
-            n=len(cache_years(self.data[sport],sport))
-            self.archive_info.setText(
-                f"{sport} historical archive: {n} provider seasons, "
-                f"{len(self.data[sport]):,} saved records. {message}")
-        self.statusBar().showMessage("Historical request finished",7000)
-        QMessageBox.information(
-            self,"GameSense historical library",
-            f"{saved} newly downloaded season(s) saved.\n\n{message}\n\n"
-            "Only statistics actually recorded by the provider are shown. "
-            "Missing historical player metrics are not invented.")
-
-    def closeEvent(self,event):
-        if self._thread is not None:
-            self.cancel_download()
-            event.ignore()
-            self.statusBar().showMessage(
-                "Stopping historical download: close the app once the current request finishes.")
-        else:
-            super().closeEvent(event)
-
-    def export_file(self):
-        path,_=QFileDialog.getSaveFileName(self,"Export filtered data","gamesense_export.csv","CSV (*.csv)")
+    def _save_frame(self, frame, suggested):
+        path, _ = QFileDialog.getSaveFileName(self, 'Export statistics', suggested, 'CSV (*.csv)')
         if path:
             try:
-                self.current().to_csv(path,index=False)
-                QMessageBox.information(self,"Export complete",f"Saved {path}")
+                frame.to_csv(path, index=False)
+                self.status.setText('Exported ' + str(len(frame)) + ' rows to ' + path)
+            except OSError as exc:
+                self.status.setText('Export failed: ' + str(exc))
+
+    def _export_records(self):
+        self._save_frame(self.raw_table.model().frame, 'gamesense_records.csv')
+
+    def _export_leaders(self):
+        self._save_frame(getattr(self, 'leader_frame', pd.DataFrame()), 'gamesense_leaderboard.csv')
+
+    def _export_chart(self, chart):
+        path, _ = QFileDialog.getSaveFileName(self, 'Export chart', 'gamesense_chart.png', 'PNG (*.png)')
+        if path:
+            try:
+                chart.export_png(path)
+                self.status.setText('Chart saved to ' + path)
             except Exception as exc:
-                QMessageBox.critical(self,"Export failed",str(exc))
+                self.status.setText('Chart export failed: ' + str(exc))
+
+    def _export_chart_data(self, chart):
+        path, _ = QFileDialog.getSaveFileName(self, 'Export chart data', 'gamesense_chart.csv', 'CSV (*.csv)')
+        if path:
+            try:
+                chart.export_csv(path)
+                self.status.setText('Chart data saved to ' + path)
+            except Exception as exc:
+                self.status.setText('Chart data export failed: ' + str(exc))
+
+    def _export_manifest(self):
+        self._save_frame(pd.DataFrame(self.archive.coverage()), 'gamesense_coverage.csv')
+
+    def closeEvent(self, event):
+        self.cancel_event.set()
+        event.accept()

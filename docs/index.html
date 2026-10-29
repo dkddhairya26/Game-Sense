@@ -1,53 +1,103 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="GameSense desktop sports analytics for Soccer, NBA, AFL and Formula 1."><title>GameSense — Sports intelligence, reimagined</title><style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#080d18;color:#f0f5ff;font:16px system-ui,Segoe UI,sans-serif}header,main,footer{max-width:1120px;margin:auto;padding:28px}header{display:flex;align-items:center;justify-content:space-between}.logo{font-size:25px;font-weight:850;letter-spacing:-1px}.logo span{color:#36e7bb}nav a{color:#a8b8d3;text-decoration:none;margin-left:22px}.hero{padding:85px 0 70px;max-width:840px}.eyebrow{color:#39e3b6;font-weight:700;letter-spacing:2px;font-size:12px}h1{font-size:clamp(46px,7vw,84px);letter-spacing:-4px;line-height:1.04;margin:20px 0}p{color:#a8b8d3;line-height:1.7}.hero p{font-size:20px;max-width:640px}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.btn{background:#35d9b3;color:#061b1c;text-decoration:none;font-weight:800;padding:15px 23px;border-radius:12px}.btn.secondary{background:#192842;color:#eaf2ff}.notice{font-size:13px;color:#a8b8d3;margin-top:18px}.sports{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.sport{min-height:175px;border-radius:17px;padding:22px;border:1px solid #29374d;background:linear-gradient(145deg,#15223a,#0c1424)}.sport b{font-size:22px}.sport small{display:block;margin-top:12px;color:#b2c2d9}.soccer{border-top:4px solid #21d88c}.nba{border-top:4px solid #ff9d47}.afl{border-top:4px solid #f5c55b}.f1{border-top:4px solid #ff5569}.section{padding:45px 0}.section h2{font-size:35px}footer{border-top:1px solid #27344b;color:#8fa3be;font-size:13px}@media(max-width:750px){.sports{grid-template-columns:repeat(2,1fr)}h1{letter-spacing:-2px}}@media(max-width:420px){.sports{grid-template-columns:1fr}}
- .btn.off{opacity:.42;cursor:not-allowed;pointer-events:none}</style></head><body><header><div class="logo">GAME<span>SENSE</span></div><nav><a href="#sports">Sports</a><a href="#download">Download</a></nav></header><main><section class="hero"><div class="eyebrow">DESKTOP SPORTS ANALYTICS</div><h1>Every game tells a story.<br>Find the numbers behind it.</h1><p>Explore performances, compare competitors and visualise trends across four sports. A desktop experience built for sports fans.</p><div class="actions" id="download"><a class="btn" id="windows" href="#">Download for Windows</a><a class="btn secondary" id="mac" href="#">Download for macOS</a></div><p class="notice" id="status">Downloads will activate when the first public release is published. Current builds use demo data unless you import your own datasets.</p></section><section class="section" id="sports"><h2>Four sports. Four experiences.</h2><div class="sports"><div class="sport soccer"><b>⚽ Soccer</b><small>Pitch mode · form and goals</small></div><div class="sport nba"><b>🏀 NBA</b><small>Court mode · points and assists</small></div><div class="sport afl"><b>🏉 AFL</b><small>Oval mode · disposals and tackles</small></div><div class="sport f1"><b>🏎️ Formula 1</b><small>Race mode · finishing and points</small></div></div></section><section class="section"><h2>Made for your desktop.</h2><p>No browser tab or developer tools. Install, launch and explore. Supports Windows and macOS after platform-specific builds are published.</p></section></main><footer>GameSense · Independent sports analytics project. Not affiliated with any sporting league. Data availability depends on imported datasets.</footer><script src="release-config.js"></script><script>
-// Configure your public repository in release-config.js before publishing.
-// Only enable buttons for real assets that exist on a published release.
-const cfg=window.GAMESENSE_RELEASE||{};
-const repo=cfg.repository||"";
-const tag=cfg.tag||"v0.4.0-beta.1";
-const targets={
- windows:{name:"GameSenseSetup-Windows.exe",label:"Download Windows beta"},
- mac:{name:"GameSense-macOS.dmg",label:"Download macOS beta"}
-};
-for(const id of Object.keys(targets)){
- const btn=document.getElementById(id);
- btn.removeAttribute("href");
- btn.classList.add("off");
- btn.textContent="Checking "+(id==="windows"?"Windows":"macOS")+" download...";
-}
-const status=document.getElementById("status");
-status.textContent="Checking published preview installers. This is beta software: historical coverage is incomplete, and unsigned builds may show security warnings.";
-if(/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repo)){
- fetch("https://api.github.com/repos/"+repo+"/releases/tags/"+encodeURIComponent(tag),
-       {headers:{"Accept":"application/vnd.github+json"}})
-  .then(response=>{if(!response.ok)throw new Error("No published preview release yet");return response.json();})
-  .then(release=>{
-    const assets=release.assets||[];
-    let count=0;
-    for(const [id,info] of Object.entries(targets)){
-      const asset=assets.find(a=>a.name===info.name && a.browser_download_url);
-      const btn=document.getElementById(id);
-      if(asset){
-        btn.href=asset.browser_download_url;
-        btn.textContent=info.label;
-        btn.classList.remove("off");
-        count++;
-      }else{
-        btn.textContent=(id==="windows"?"Windows":"macOS")+" build pending";
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="GameSense: native desktop sports analytics for football, NBA, AFL and Formula 1, with transparent historical coverage and interactive statistics.">
+  <title>GameSense · The story behind the score</title>
+  <style>
+    :root{color-scheme:dark;--ink:#eff5f2;--muted:#98aba5;--green:#91e8bd;--line:#263a35}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#0b1315;color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}header,main,footer{max-width:1180px;margin:auto;padding:30px 36px}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}.brand{font-size:23px;font-weight:850;letter-spacing:-1px}.brand span{color:var(--green)}nav{display:flex;gap:26px}a{color:inherit}nav a{font-size:14px;color:var(--muted);text-decoration:none}.hero{padding:78px 0 60px;display:grid;grid-template-columns:1.25fr 1fr;gap:50px;align-items:center}.eyebrow{font:700 11px/1.6 system-ui,sans-serif;letter-spacing:2.7px;text-transform:uppercase;color:var(--green)}h1{font-size:clamp(46px,6.3vw,76px);line-height:1.05;letter-spacing:-3.5px;font-weight:650;margin:22px 0}h1 span{color:var(--green)}p{color:var(--muted)}.intro{max-width:570px;font-size:17px}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}.btn{display:inline-block;text-decoration:none;background:var(--green);color:#10251c;font-weight:750;font-size:14px;padding:13px 19px;border-radius:9px}.btn.secondary{background:#1b2c2a;color:var(--ink);border:1px solid #39514a}.btn[aria-disabled=true]{opacity:.5;cursor:default}.btn:focus-visible,a:focus-visible{outline:3px solid #a5e8ff;outline-offset:5px}.notice{font-size:12px;max-width:600px}.artifact{padding:24px;border:1px solid #355347;border-radius:22px;background:radial-gradient(ellipse at top right,#1c4033,#10201c 75%);box-shadow:0 30px 80px #0004}.artifact .topline{display:flex;justify-content:space-between;color:#a5bdb1;font-size:10px;letter-spacing:1.8px}.artifact svg{width:100%;display:block;margin:26px auto}.artifact .caption{font-size:12px;color:#a6beb3;border-top:1px solid #335346;padding-top:18px}.section{padding:38px 0}.section h2{font-weight:600;font-size:30px;letter-spacing:-1px;margin:0 0 22px}.sports{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.sport{background:#12201f;border:1px solid var(--line);border-radius:13px;padding:23px;min-height:192px;border-top:3px solid var(--accent)}.sport .num{font-size:10px;letter-spacing:2px;color:var(--accent)}.sport b{display:block;font-size:21px;margin-top:16px;font-weight:650}.sport p{font-size:13px;margin-bottom:0}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;padding-top:22px;border-top:1px solid var(--line)}.facts h3{font-size:16px;font-weight:650}.facts p{font-size:14px}.release-link{font-size:13px;color:var(--green)}footer{display:flex;justify-content:space-between;gap:26px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);margin-top:30px}footer a{color:var(--green)}@media(max-width:850px){.hero{grid-template-columns:1fr;gap:26px;padding-top:48px}.artifact{max-width:540px}.sports{grid-template-columns:repeat(2,1fr)}}@media(max-width:520px){header,main,footer{padding:22px}nav{gap:14px}.hero{padding:32px 0}h1{letter-spacing:-2px}.sports,.facts{grid-template-columns:1fr}.sport{min-height:auto}footer{display:block}.artifact{display:none}}
+  </style>
+</head>
+<body>
+  <header><div class="brand">GAME<span>SENSE</span></div><nav><a href="#sports">The sports</a><a href="#download">Get the app</a><a href="https://github.com/dkddhairya26/Game-Sense">Source</a></nav></header>
+  <main>
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Independent sports intelligence</div>
+        <h1>The story<br>behind <span>the score.</span></h1>
+        <p class="intro">Follow the careers. Compare the greats. Find the patterns. Explore four sports in a native desktop application built around real records and honest data.</p>
+        <div class="actions" id="download">
+          <a class="btn" id="windows" aria-disabled="true" tabindex="-1">Windows · checking release</a>
+          <a class="btn secondary" id="mac" aria-disabled="true" tabindex="-1">macOS · Apple Silicon · checking release</a>
+        </div>
+        <p class="notice" id="release-status" role="status" aria-live="polite">Checking GitHub for published installer files. Downloads activate only when the matching release asset exists.</p>
+        <p class="notice">Windows x64. The Mac preview is for Apple Silicon; its bundled dependencies require macOS 14 or later. Both installers are unsigned previews.</p>
+        <a class="release-link" href="https://github.com/dkddhairya26/Game-Sense/releases">View releases and checksums →</a>
+      </div>
+      <div class="artifact" aria-label="Original GameSense football pitch illustration">
+        <div class="topline"><span>GAMESENSE / PITCH MODE</span><span>01 — 04</span></div>
+        <svg viewBox="0 0 420 265" role="img" aria-label="Football pitch diagram">
+          <defs><pattern id="grass" width="60" height="230" patternUnits="userSpaceOnUse"><rect width="30" height="230" fill="#ffffff" opacity=".018"/></pattern></defs>
+          <rect x="20" y="15" width="380" height="235" rx="6" fill="url(#grass)" stroke="#89c8a9" stroke-width="1.5"/>
+          <g fill="none" stroke="#79b095" stroke-width="1.2"><path d="M210 15v235"/><circle cx="210" cy="132" r="38"/><path d="M20 70h65v125H20m380-125h-65v125h65M20 100h25v65H20m380-65h-25v65h25"/></g>
+          <circle cx="210" cy="132" r="3" fill="#91e8bd"/>
+        </svg>
+        <div class="caption">The right view for every sport. Spatial analytics appear only when the source supplies real coordinates.</div>
+      </div>
+    </section>
+    <section class="section" id="sports">
+      <div class="eyebrow">One library. Four perspectives.</div>
+      <h2>Choose your arena.</h2>
+      <div class="sports">
+        <div class="sport" style="--accent:#91e8bd"><span class="num">01 / PITCH MODE</span><b>Football</b><p>Player events, team performance and historical competitions from supported sources.</p></div>
+        <div class="sport" style="--accent:#ffad76"><span class="num">02 / COURT MODE</span><b>NBA</b><p>Recent player-season statistics, scoring and comparisons. Full historical careers need an additional permitted source.</p></div>
+        <div class="sport" style="--accent:#e7cb7d"><span class="num">03 / OVAL MODE</span><b>AFL</b><p>Historical club results. Individual player statistics require an appropriately licensed import.</p></div>
+        <div class="sport" style="--accent:#f18787"><span class="num">04 / RACE MODE</span><b>Formula 1</b><p>Drivers, constructors and race results, with historical coverage from 1950 where available.</p></div>
+      </div>
+    </section>
+    <section class="section facts">
+      <div><h3>Your desktop. Your library.</h3><p>Downloads stay available locally. End users need no Python, code editor or terminal once a native installer is published.</p></div>
+      <div><h3>Sources you can inspect.</h3><p>Coverage varies by sport, provider and era. Missing statistics stay missing. Demonstration data is clearly labelled.</p></div>
+      <div><h3>Built for exploration.</h3><p>Interactive trends, rankings, comparisons and exports turn downloaded sporting records into useful questions.</p></div>
+    </section>
+  </main>
+  <footer><span>GameSense · Independent sports analytics. No league affiliation.</span><span>Images and data remain subject to source terms. <a href="https://github.com/dkddhairya26/Game-Sense/blob/main/docs/TECHNICAL_REPORT.md">Coverage &amp; limitations</a></span></footer>
+  <script src="release-config.js"></script>
+  <script>
+    // Use GitHub's actual asset URLs; never activate a guessed /latest/download path.
+    (async () => {
+      const config = window.GAMESENSE_RELEASE || {};
+      const repository = config.repository || '';
+      const pinnedTag = config.tag || '';
+      const status = document.getElementById('release-status');
+      const targets = [['windows', 'GameSenseSetup-Windows.exe', 'Windows x64'], ['mac', 'GameSense-macOS.dmg', 'macOS · Apple Silicon']];
+      for (const [id, , label] of targets) document.getElementById(id).textContent = label + ' · not published';
+      if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) { status.textContent = 'Release repository is not configured.'; return; }
+      if (pinnedTag && !/^v[\w.+-]+$/.test(pinnedTag)) { status.textContent = 'Release tag is not configured correctly.'; return; }
+      try {
+        const api = 'https://api.github.com/repos/' + repository + '/releases';
+        const options = {headers: {'Accept':'application/vnd.github+json'}};
+        const response = await fetch(api + (pinnedTag ? '/tags/' + encodeURIComponent(pinnedTag) : '/latest'), options);
+        let release;
+        if (response.ok) {
+          release = await response.json();
+        } else if (response.status === 404 && !pinnedTag) {
+          // GitHub's /latest excludes prereleases. Expose a real public preview
+          // explicitly when the repository has not published a stable release.
+          const fallback = await fetch(api + '?per_page=20', options);
+          if (!fallback.ok) throw new Error('No published release');
+          const releases = await fallback.json();
+          release = releases.find(item => !item.draft && targets.some(([, filename]) => (item.assets || []).some(asset => asset.name === filename)));
+          if (!release) throw new Error('No published installer');
+        } else {
+          throw new Error('Release availability unavailable');
+        }
+        if (release.draft) throw new Error('Release is not public');
+        let available = 0;
+        for (const [id, filename, label] of targets) {
+          const asset = (release.assets || []).find(item => item.name === filename);
+          if (!asset || asset.state !== 'uploaded' || !Number.isFinite(asset.size) || asset.size <= 0 || typeof asset.browser_download_url !== 'string' || !asset.browser_download_url.startsWith('https://github.com/' + repository + '/releases/download/')) continue;
+          const button = document.getElementById(id);
+          button.href = asset.browser_download_url;
+          button.textContent = 'Download for ' + label + (release.prerelease ? ' · preview' : '');
+          button.removeAttribute('aria-disabled'); button.removeAttribute('tabindex'); available++;
+        }
+        status.textContent = available ? (release.prerelease ? 'Preview release ' : 'Release ') + release.tag_name + ' · ' + available + ' platform installer' + (available === 1 ? '' : 's') + ' available. Unsigned builds may prompt a security warning. Check the release notes and checksums.' : 'The latest release has no matching native installers yet. Check the release page for current status.';
+      } catch (_) {
+        status.textContent = 'Published installer availability could not be confirmed. Check the release page for downloads and build status.';
       }
-    }
-    status.textContent=count?
-      "GameSense v0.4 beta — "+count+" public installer(s) available. Includes native sport dashboards, local caching, and optional data downloads. Unsigned build security prompts may appear.":
-      "The preview release exists, but installers have not finished uploading yet.";
-  })
-  .catch(()=>{
-    for(const [id] of Object.entries(targets)){
-      document.getElementById(id).textContent="Preview not yet published";
-    }
-    status.textContent="GameSense v0.4 beta installers are being prepared. Please check this page later.";
-  });
-}else{
- status.textContent="Public release location is not configured yet.";
-}
-</script></body></html>
+    })();
+  </script>
+</body>
+</html>
