@@ -304,7 +304,7 @@ class GameSenseWindow(QMainWindow):
             self.nav_buttons[key] = btn
             nav.addWidget(btn)
         nav.addSpacing(14)
-        nav.addWidget(label('DESKTOP  /  0.7.0 DEVELOPMENT', 'muted'))
+        nav.addWidget(label('DESKTOP  /  0.8.0 · MULTI-LEAGUE EDITION', 'muted'))
         shell.addWidget(sidebar)
         body = QWidget()
         layout = QVBoxLayout(body)
