@@ -21,6 +21,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))  # Running python scripts/build_football_seed.py from CI
+# Provider subclasses are registered from gamesense.providers at import time;
+# initialize the registry before importing a subclass directly.
+from gamesense import providers as _providers
 from gamesense.openfootball_provider import DEFAULT_LEAGUES, REPO, fixture_records
 DEST = ROOT / "data" / "seed_soccer_cc0.jsonl.gz"
 FIRST = 2015
