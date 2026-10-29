@@ -499,7 +499,7 @@ class GameSenseWindow(QMainWindow):
         row.addWidget(self.athlete, 1)
         self.fav_button = button('Save favourite', self._toggle_favourite)
         row.addWidget(self.fav_button)
-        row.addWidget(button('Retrieve missing history', lambda: self.navigate('downloads')))
+        row.addWidget(button('Find missing players online', self._open_data_finder))
         layout.addLayout(row)
         filters = QHBoxLayout()
         self.era_start, self.era_end = QSpinBox(), QSpinBox()
@@ -661,6 +661,35 @@ class GameSenseWindow(QMainWindow):
         self.provider_note = label('', 'muted', True)
         self.provider_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.provider_note)
+        # Optional authenticated football data: no key is bundled or saved.
+        self.api_finder, api = panel()
+        api.addWidget(label('GLOBAL FOOTBALL PLAYER FINDER', 'section'))
+        api.addWidget(label(
+            'Use your own API-Football key to search genuine players by provider ID. '
+            'Search Ronaldo, confirm his identity, then retrieve only seasons '
+            'covered by your provider subscription. The key stays in memory.',
+            'muted', True))
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_input.setPlaceholderText('Your API-Football key — session only; not stored')
+        api.addWidget(self.api_key_input)
+        lookup = QHBoxLayout()
+        self.api_player_search = QLineEdit()
+        self.api_player_search.setPlaceholderText('Search surname, e.g. Ronaldo')
+        self.api_player_search.returnPressed.connect(self._find_api_player)
+        lookup.addWidget(self.api_player_search, 1)
+        lookup.addWidget(button('Find real player', self._find_api_player))
+        api.addLayout(lookup)
+        self.api_player_results = QComboBox()
+        self.api_player_results.setMinimumHeight(34)
+        api.addWidget(self.api_player_results)
+        api.addWidget(button('DOWNLOAD SELECTED PLAYER CAREER', self._download_api_player, True))
+        self.api_search_status = label(
+            'Requires an API-Sports account. Availability, costs and redistribution '
+            'rights depend on your plan. No complete Ronaldo history is promised.',
+            'muted', True)
+        api.addWidget(self.api_search_status)
+        layout.addWidget(self.api_finder)
         row = QHBoxLayout()
         row.addWidget(button('Discover available seasons', self._discover_seasons))
         self.range_start, self.range_end = QComboBox(), QComboBox()
@@ -669,7 +698,9 @@ class GameSenseWindow(QMainWindow):
         row.addWidget(self.range_end, 1)
         layout.addLayout(row)
         self.competition = QComboBox()
-        self.competition.setPlaceholderText('Discover competitions from the football source')
+        self.competition.setEditable(True)
+        self.competition.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.competition.setPlaceholderText('Discover and type to filter available competitions')
         competition_row = QHBoxLayout()
         competition_row.addWidget(self.competition, 1)
         self.competition_button = button('Download competition', lambda: self._start_download('competition'))
@@ -755,6 +786,14 @@ class GameSenseWindow(QMainWindow):
             btn.setChecked(key == route)
         self.breadcrumb.setText('WORKSPACE / ' + self.nav_buttons[route].text().upper())
         self.refresh()
+
+    def _open_data_finder(self):
+        self.navigate('downloads')
+        if self.sport_name == 'Soccer':
+            self.provider.setCurrentIndex(self.provider.findData('api_football'))
+            term = self.search.text().strip()
+            if term:
+                self.api_player_search.setText(term)
 
     def open_sport(self, sport):
         self.sport.setCurrentText(sport)
@@ -1140,6 +1179,10 @@ class GameSenseWindow(QMainWindow):
             return
         provider = PROVIDERS[self.provider.currentData()]
         self.provider_note.setText(self._provider_description(provider))
+        football_mode = self.provider.currentData() == 'api_football'
+        self.api_finder.setVisible(football_mode)
+        for widget in (self.download_all, self.download_range, self.download_latest):
+            widget.setVisible(not football_mode)
         self.download_seasons = []
         if hasattr(self, 'range_start'):
             self.range_start.clear()
@@ -1148,6 +1191,84 @@ class GameSenseWindow(QMainWindow):
             self.competition.clear()
             self.competition.setVisible(hasattr(provider, 'competitions'))
             self.competition_button.setVisible(hasattr(provider, 'competitions'))
+
+    def _configure_api_football(self):
+        provider = PROVIDERS['api_football']
+        key = self.api_key_input.text().strip()
+        if not key:
+            self.api_search_status.setText(
+                'Enter your own API-Football key. Credentials are never stored.')
+            return None
+        provider.set_api_key(key)
+        return provider
+
+    def _find_api_player(self):
+        if self.download_running or not self._online():
+            return
+        provider = self._configure_api_football()
+        if provider is None:
+            return
+        name = self.api_player_search.text().strip()
+        if len(name) < 4:
+            self.api_search_status.setText('Search at least four letters.')
+            return
+        self.api_search_status.setText('Searching the provider by real player identity…')
+        def do_search(progress):
+            return provider.search_profiles(name, client=self._client())
+        def complete(results):
+            self.api_player_results.clear()
+            for item in results:
+                detail = (f"{item['name']} · {item.get('nationality') or 'unknown country'} "
+                          f"· born {item.get('birth') or 'unknown'} "
+                          f"[ID {item['id']}]")
+                self.api_player_results.addItem(detail, item)
+            self.api_search_status.setText(
+                f'{len(results)} verified provider profiles found. '
+                'Choose the correct player ID before requesting career seasons.'
+                if results else 'No players found. Check spelling and provider access.')
+        self._job('api-football-search', do_search, complete,
+                  lambda err: self.api_search_status.setText('Lookup failed: '+err))
+
+    def _download_api_player(self):
+        if self.download_running or not self._online():
+            return
+        provider = self._configure_api_football()
+        item = self.api_player_results.currentData()
+        if provider is None or not item:
+            self.api_search_status.setText('Find and select a real provider player first.')
+            return
+        response = QMessageBox.question(
+            self, 'Download historical player records',
+            f"Retrieve all seasons your API-Football plan exposes for "
+            f"{item['name']} (provider ID {item['id']})?\n\n"
+            'This uses account API calls and stores the returned statistics locally. '
+            'Source availability and data/image redistribution rights may be limited.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        self.cancel_event.clear()
+        self.download_running=True
+        self.provider.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.progress.setRange(0,0)
+        self.progress_text.setText('Fetching verified historical athlete records…')
+        def download(progress):
+            def report(done,total,msg):
+                progress(f'{done} · {total} · {msg}')
+            return provider.download_player(self.archive,item['id'],
+                                            client=self._client(),progress=report)
+        def done(outcome):
+            self._download_done(outcome['records'])
+            missing=outcome.get('failures',[])
+            self.api_search_status.setText(
+                f"{outcome['records']} player/league/season records stored. "
+                + (f"Unretrieved years: {', '.join(map(str,missing[:12]))}."
+                   if missing else 'All returned provider seasons retrieved.'))
+            self.sport.setCurrentText('Soccer')
+            self.search.setText(item['name'])
+            self.navigate('profiles')
+        self._job('api-football-player',download,done,self._download_failed)
 
     def _job(self, key, fn, done, failed=None):
         if key in self.jobs:
@@ -1176,6 +1297,9 @@ class GameSenseWindow(QMainWindow):
             return
         self.cancel_event.clear()
         provider = PROVIDERS[self.provider.currentData()]
+        if self.provider.currentData() == 'api_football':
+            if self._configure_api_football() is None:
+                return
         self.progress_text.setText('Discovering available seasons…')
         self.provider.setEnabled(False)
         def discover(progress):
@@ -1206,6 +1330,14 @@ class GameSenseWindow(QMainWindow):
             self.progress_text.setText('Offline mode is enabled. Change Preferences to download history.')
             return
         provider = PROVIDERS[self.provider.currentData()]
+        if self.provider.currentData() == 'api_football':
+            if self._configure_api_football() is None:
+                return
+            if mode != 'competition':
+                self.api_search_status.setText(
+                    'API-Football requires a player or competition. '
+                    'Use Find real player or Download competition.')
+                return
         competition = self.competition.currentData() if mode == 'competition' else None
         if mode == 'competition' and not competition:
             self._discover_seasons()
