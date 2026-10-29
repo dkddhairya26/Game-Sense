@@ -334,6 +334,13 @@ class GameSenseWindow(QMainWindow):
         self.season.setMinimumWidth(128)
         self.season.currentTextChanged.connect(self._season_changed)
         header.addWidget(self.season)
+        self.competition_filter = QComboBox()
+        self.competition_filter.setMinimumWidth(170)
+        self.competition_filter.setToolTip(
+            'Filter to a real league or competition present in your downloaded archive.')
+        self.competition_filter.addItem('All competitions')
+        self.competition_filter.currentTextChanged.connect(self._competition_changed)
+        header.addWidget(self.competition_filter)
         layout.addLayout(header)
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
@@ -890,6 +897,11 @@ class GameSenseWindow(QMainWindow):
         self.season.clear()
         self.season.addItems(['All downloaded seasons'] + list(map(str, seasons)))
         self.season.blockSignals(False)
+        self.competition_filter.blockSignals(True)
+        self.competition_filter.clear()
+        available = self.archive.competitions(sport) if not self.demo else []
+        self.competition_filter.addItems(['All competitions'] + available)
+        self.competition_filter.blockSignals(False)
         self.page_offset = 0
         self.search.clear()
         self._update_identities()
@@ -897,6 +909,16 @@ class GameSenseWindow(QMainWindow):
 
     def _selected_season(self):
         return None if self.season.currentIndex() <= 0 else self.season.currentText()
+
+    def _selected_competition(self):
+        if not hasattr(self, 'competition_filter') or self.competition_filter.currentIndex() <= 0:
+            return None
+        return self.competition_filter.currentText()
+
+    def _competition_changed(self, *_):
+        self.page_offset = 0
+        self._update_identities()
+        self.refresh()
 
     def _season_changed(self, *_):
         self.page_offset = 0
@@ -911,12 +933,17 @@ class GameSenseWindow(QMainWindow):
             data['record_type'] = 'demo_event'
             if self._selected_season():
                 data = data[data['season'].astype(str) == self._selected_season()]
+            if self._selected_competition() and 'competition' in data:
+                data = data[data['competition'] == self._selected_competition()]
             if competitor_id:
                 data = data[data['competitor_id'] == competitor_id]
             if team:
                 data = data[data['team'] == team]
             return data.iloc[offset:offset+limit].copy()
-        return self.archive.query(self.sport_name, season=self._selected_season(), competitor_id=competitor_id, team=team, limit=limit, offset=offset)
+        return self.archive.query(
+            self.sport_name, season=self._selected_season(),
+            competition=self._selected_competition(),
+            competitor_id=competitor_id, team=team, limit=limit, offset=offset)
 
     def _update_identities(self):
         text = self.search.text().strip()
@@ -928,7 +955,10 @@ class GameSenseWindow(QMainWindow):
         else:
             first = str(self.era_start.value()) if hasattr(self, 'era_start') and self.era_start.value() else None
             last = str(self.era_end.value()) + '\uffff' if hasattr(self, 'era_end') and self.era_end.value() else None
-            ids = self.archive.search(self.sport_name, text=text, limit=1000, first_season=first, last_season=last)
+            ids = self.archive.search(
+                self.sport_name, text=text, limit=1000,
+                first_season=first, last_season=last,
+                competition=self._selected_competition())
         if hasattr(self, 'favourites_only') and self.favourites_only.isChecked() and not ids.empty:
             ids = ids[ids['competitor_id'].astype(str).isin(self._favourites())]
         self.identities = ids
