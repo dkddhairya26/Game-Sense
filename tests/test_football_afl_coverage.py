@@ -67,7 +67,7 @@ def test_openfootball_download_competition_does_not_claim_all_leagues(tmp_path,m
     assert archive.stats("Soccer")["competitors"]==2
     coverage=archive.coverage("Soccer")
     assert coverage[0]["status"]=="partial"
-    assert "no player" in coverage[0]["error"].lower()
+    assert "not player statistics" in coverage[0]["error"].lower()
 
 
 def test_afl_player_columns_are_real_not_zero_filled():
