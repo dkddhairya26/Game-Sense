@@ -1,5 +1,8 @@
 name: Verify preview desktop packages
 on:
+  push:
+    branches:
+      - feature/real-history-and-multi-chart-dashboard
   pull_request:
     paths:
       - 'app.py'
