@@ -141,3 +141,46 @@ def test_sources_registered_but_bundling_not_misrepresented():
     assert 'api_football' in PROVIDERS
     assert PROVIDERS['api_football'].meta.sport=='Soccer'
     assert 'paid' in PROVIDERS['api_football'].meta.license.lower()
+
+
+def test_statsbomb_free_ronaldo_2022_does_not_fake_club_career(tmp_path,monkeypatch):
+    from gamesense.providers import StatsBombProvider
+    db=Archive(tmp_path/'g.sqlite3')
+    provider=StatsBombProvider()
+    monkeypatch.setattr(provider,'competitions',lambda client:[
+        {'competition_id':43,'season_id':106,'season_name':'2022',
+         'competition_name':'FIFA World Cup'}])
+    class Client:
+        def check(self): pass
+        def get_json(self,url):
+            assert url.endswith('/matches/43/106.json')
+            return [
+                {'match_id':1,'home_team':{'home_team_name':'Portugal'},
+                 'away_team':{'away_team_name':'Uruguay'}},
+                {'match_id':2,'home_team':{'home_team_name':'France'},
+                 'away_team':{'away_team_name':'Spain'}},
+            ]
+    monkeypatch.setattr(provider,'_match_rows',lambda competition,match,client:[
+        {'sport':'Soccer','provider':'statsbomb','season':'2022',
+         'date':'2022-11-28','record_id':'mock-world-cup-ronaldo',
+         'competitor_id':'statsbomb:fake-source-player-id',
+         'competitor':'Cristiano Ronaldo dos Santos Aveiro',
+         'team':'Portugal','competition':'FIFA World Cup','goals':0}
+    ])
+    count=provider.download_ronaldo_2022(db,client=Client())
+    assert count==1
+    assert db.count('Soccer')==1
+    assert 'Portugal' in db.query('Soccer').iloc[0]['team']
+    assert db.coverage('Soccer')[0]['status']=='partial'
+
+
+def test_dashboard_uses_six_simultaneous_visuals():
+    # The source must define a grid of *different* chart instances, not
+    # merely add options to a single graph's type selector.
+    import inspect
+    from gamesense.window import GameSenseWindow
+    source=inspect.getsource(GameSenseWindow._build_dashboard)
+    assert 'self.dash_visuals.append((caption, chart))' in source
+    source=inspect.getsource(GameSenseWindow._plot_dashboard)
+    assert all(mode in source for mode in ['Season trend','Distribution','Ranking',
+                                          'Scatter','Radar','Box plot'])
