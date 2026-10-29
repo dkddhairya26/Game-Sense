@@ -661,6 +661,18 @@ class GameSenseWindow(QMainWindow):
         self.provider_note = label('', 'muted', True)
         self.provider_note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.provider_note)
+        free_player_card, free_player_layout = panel()
+        free_player_layout.addWidget(
+            label('START WITH A REAL FOOTBALL LEGEND', 'section'))
+        free_player_layout.addWidget(label(
+            'Cristiano Ronaldo · Portugal · FIFA World Cup 2022. Fetch verified '
+            'match statistics from StatsBomb Open Data without an API key. '
+            'This is World Cup coverage, NOT his full club career.',
+            'muted', True))
+        free_player_layout.addWidget(button(
+            'GET REAL CRISTIANO RONALDO · WORLD CUP 2022',
+            self._download_ronaldo_sample, True))
+        layout.addWidget(free_player_card)
         # Optional authenticated football data: no key is bundled or saved.
         self.api_finder, api = panel()
         api.addWidget(label('GLOBAL FOOTBALL PLAYER FINDER', 'section'))
@@ -1191,6 +1203,42 @@ class GameSenseWindow(QMainWindow):
             self.competition.clear()
             self.competition.setVisible(hasattr(provider, 'competitions'))
             self.competition_button.setVisible(hasattr(provider, 'competitions'))
+
+    def _download_ronaldo_sample(self):
+        if self.download_running or not self._online():
+            return
+        reply=QMessageBox.question(
+            self,'Verified real football data',
+            'Download Cristiano Ronaldo’s recorded Portugal matches from '
+            'StatsBomb Open Data’s 2022 FIFA World Cup?\n\n'
+            'This is a research/noncommercial dataset with source attribution. '
+            'It does NOT include every Manchester United, Real Madrid, Juventus '
+            'or Al Nassr season. It will not manufacture missing seasons.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        provider=PROVIDERS['statsbomb']
+        self.cancel_event.clear()
+        self.download_running=True
+        self.cancel_button.setEnabled(True)
+        self.provider.setEnabled(False)
+        self.progress.setRange(0,0)
+        self.progress_text.setText(
+            'Retrieving real Cristiano Ronaldo Portugal World Cup records…')
+        def run(progress):
+            return provider.download_ronaldo_2022(
+                self.archive,client=self._client(),
+                progress=lambda a,b,msg: progress(f'{a} · {b} · {msg}'))
+        def done(count):
+            self._download_done(count)
+            self.sport.setCurrentText('Soccer')
+            self.search.setText('Cristiano Ronaldo')
+            self.navigate('profiles')
+            self.status.setText(
+                f'{count} actual Ronaldo World Cup match records imported. '
+                'The remaining club career is NOT covered by this source.')
+        self._job('real-ronaldo-2022',run,done,self._download_failed)
 
     def _configure_api_football(self):
         provider = PROVIDERS['api_football']
