@@ -289,7 +289,7 @@ class GameSenseWindow(QMainWindow):
         nav.addWidget(label('SPORTS INTELLIGENCE', 'eyebrow'))
         nav.addSpacing(30)
         self.nav_buttons = {}
-        for key, title in [('home','Overview'), ('dashboard','Sport dashboard'), ('profiles','Athlete explorer'), ('teams','Teams and rosters'), ('compare','Head to head'), ('leaders','Leaderboards'), ('explorer','Historical records')]:
+        for key, title in [('home','Overview'), ('dashboard','Sport dashboard'), ('profiles','Players & clubs'), ('teams','Teams and rosters'), ('compare','Head to head'), ('leaders','Leaderboards'), ('explorer','Historical records')]:
             btn = button(title, lambda checked=False, k=key: self.navigate(k))
             btn.setObjectName('nav')
             btn.setCheckable(True)
@@ -503,7 +503,7 @@ class GameSenseWindow(QMainWindow):
 
     def _build_profiles(self):
         layout = self.page_layouts['profiles']
-        self._heading(layout, 'ATHLETE EXPLORER', 'The career behind the numbers.', 'Search downloaded identities. Select an athlete to explore every locally available season.')
+        self._heading(layout, 'PLAYERS & CLUBS', 'A complete picture of the game.', 'Explore real athlete performance and verified club results across recorded seasons and leagues. Club goals are not player goals.')
         self.athlete = QComboBox()
         self.athlete.setEditable(True)
         self.athlete.completer().setFilterMode(Qt.MatchFlag.MatchContains)
@@ -514,8 +514,13 @@ class GameSenseWindow(QMainWindow):
         row.addWidget(self.athlete, 1)
         self.fav_button = button('Save favourite', self._toggle_favourite)
         row.addWidget(self.fav_button)
-        row.addWidget(button('Find missing players online', self._open_data_finder))
+        row.addWidget(button('Explore verified data sources', self._open_data_finder))
         layout.addLayout(row)
+        self.profile_full_history = QCheckBox(
+            'Show full downloaded club history · all seasons & competitions')
+        self.profile_full_history.setChecked(True)
+        self.profile_full_history.toggled.connect(self._load_profile)
+        layout.addWidget(self.profile_full_history)
         filters = QHBoxLayout()
         self.era_start, self.era_end = QSpinBox(), QSpinBox()
         for spin in (self.era_start, self.era_end):
@@ -540,7 +545,8 @@ class GameSenseWindow(QMainWindow):
         self.profile_name = label('Choose an athlete', 'heading', True)
         self.profile_meta = label('', 'muted', True)
         self.profile_summary = label('', 'muted', True)
-        text.addWidget(label('CAREER PROFILE', 'eyebrow'))
+        self.profile_eyebrow = label('CAREER PROFILE', 'eyebrow')
+        text.addWidget(self.profile_eyebrow)
         text.addWidget(self.profile_name)
         text.addWidget(self.profile_meta)
         text.addWidget(self.profile_summary)
@@ -554,6 +560,8 @@ class GameSenseWindow(QMainWindow):
             numbers.addLayout(stat)
             self.hero_metrics.append((value, caption))
         text.addLayout(numbers)
+        self.profile_breakdown = label('', 'muted', True)
+        text.addWidget(self.profile_breakdown)
         text.addStretch()
         hero.addLayout(text, 1)
         inner.addLayout(hero)
@@ -575,6 +583,16 @@ class GameSenseWindow(QMainWindow):
         self.history_table = self._table(270)
         hl.addWidget(self.history_table)
         tabs.addTab(history, 'Season history')
+        match_screen = QWidget()
+        match_layout = QVBoxLayout(match_screen)
+        self.profile_match_note = label(
+            'Actual final match results, with source attribution and opponent. '
+            'This is club history, not athlete appearances.', 'muted', True)
+        match_layout.addWidget(self.profile_match_note)
+        self.profile_match_table = self._table(290)
+        match_layout.addWidget(self.profile_match_table)
+        self.profile_match_index = tabs.addTab(match_screen, 'Match results')
+        self.profile_tabs = tabs
         advanced = QWidget()
         al = QVBoxLayout(advanced)
         self.advanced_table = self._table(270)
@@ -958,7 +976,8 @@ class GameSenseWindow(QMainWindow):
             ids = self.archive.search(
                 self.sport_name, text=text, limit=1000,
                 first_season=first, last_season=last,
-                competition=self._selected_competition())
+                competition=self._selected_competition(),
+                season=self._selected_season())
         if hasattr(self, 'favourites_only') and self.favourites_only.isChecked() and not ids.empty:
             ids = ids[ids['competitor_id'].astype(str).isin(self._favourites())]
         self.identities = ids
