@@ -878,6 +878,10 @@ class GameSenseWindow(QMainWindow):
         self.banner.set_sport(sport)
         if hasattr(self, 'free_player_card'):
             self.free_player_card.setVisible(sport == 'Soccer')
+        if hasattr(self, 'free_leagues_card'):
+            self.free_leagues_card.setVisible(sport == 'Soccer')
+        if hasattr(self, 'afl_research_card'):
+            self.afl_research_card.setVisible(sport == 'AFL')
         seasons = self.archive.seasons(sport)
         if self.demo:
             from .demo import demo_data
