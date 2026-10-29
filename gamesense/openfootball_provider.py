@@ -87,7 +87,9 @@ def fixture_records(payload, season: str, code: str, today: date | None = None):
             identity = f"openfootball:{code}:{team_key}"
             rows.append(_base(
                 meta, season,
-                record_id=f"openfootball:{code}:{season}:{index}:{side}",
+                record_id=(f"openfootball:{code}:{season}:{iso_date}:" 
+                           f"{re.sub(r'[^a-z0-9]+','-',home.casefold())}:"
+                           f"{re.sub(r'[^a-z0-9]+','-',away.casefold())}:{side}"),
                 date=iso_date, date_precision="day",
                 record_kind="team_match", entity_type="team",
                 competition=competition, competition_id=code,
