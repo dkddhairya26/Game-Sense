@@ -304,7 +304,7 @@ class GameSenseWindow(QMainWindow):
             self.nav_buttons[key] = btn
             nav.addWidget(btn)
         nav.addSpacing(14)
-        nav.addWidget(label('DESKTOP  /  0.6.0', 'muted'))
+        nav.addWidget(label('DESKTOP  /  0.7.0 DEVELOPMENT', 'muted'))
         shell.addWidget(sidebar)
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -780,7 +780,7 @@ class GameSenseWindow(QMainWindow):
 
     def _build_about(self):
         layout = self.page_layouts['about']
-        self._heading(layout, 'GAMESENSE / 0.6.0', 'Statistics deserve context.', 'An independent native desktop application for football, basketball, Australian football and Formula 1.')
+        self._heading(layout, 'GAMESENSE / 0.7.0 DEVELOPMENT', 'Statistics deserve context.', 'An independent native desktop application for football, basketball, Australian football and Formula 1.')
         for provider in PROVIDERS.values():
             frame, inner = panel()
             inner.addWidget(label(provider.meta.name, 'section'))
